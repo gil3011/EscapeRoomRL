@@ -51,9 +51,17 @@ Two distinct numbers, not to be confused:
 - **Escape Score** is a derived, user-facing number computed only at *evaluation* time (a single
   greedy rollout, ε=0), from steps-to-exit (grid rooms) or simulated time-to-exit (continuous
   rooms): `score = round(1000 * max(0, 1 - steps_taken / par_steps))`, clipped to 0 on
-  failure/timeout. `par_steps` is a per-room sensible default, overridable in an "Advanced"
-  sidebar section. This is the number shown on the Board tab and the lobby leaderboard — it is
+  failure/timeout. This is the number shown on the Board tab and the lobby leaderboard — it is
   never fed back into training.
+- **`par_steps` convention**: the expected steps-to-goal under a *uniform-random* policy on that
+  room's environment — not the optimal policy's own hitting time. Scoring a trained run against
+  "how a random walker would do" is what makes a good policy's score actually look good (close
+  to 1000); comparing the agent to itself would make every well-trained run score near 0. For
+  the grid rooms (1-4) this is computed exactly via `engine/dp_solver.expected_steps_to_absorption`,
+  reusing the known transition model purely for *scoring* even in rooms whose *training*
+  algorithm doesn't get to see that model (worked example: Room 1 in SPRINTS.md). Continuous
+  rooms (5-6) have no tabular model to solve exactly, so they'll need a simulated-rollout
+  approximation instead — revisit when those sprints come up.
 
 ### 2.3 Training run lifecycle
 Every room's Train tab follows the same convention (copied from the LunarLander example):
@@ -172,14 +180,27 @@ room, checkpoint replay slider, "▶ Run escape attempt" with Escape Score).
 | 6 | The Obstacle Gauntlet | DQN (function approximation) | Unknown | continuous + nearby obstacles | 9 (vx,vy combos) |
 
 ### Room 1 — The Frozen Vault (Dynamic Programming)
-- **Task**: known-model 10×10 `GridWorld` with several slippery cells (slip probability
-  `p_slip`: intended action succeeds, otherwise a random action is substituted), no traps by
-  default. Single goal cell.
-- **Algorithm**: sidebar choice of **Value Iteration** or **Policy Iteration**, run directly on
-  `transition_model()` — no environment interaction needed, "training" = Bellman sweeps to
-  convergence (`max|ΔV| < θ`).
-- **Sidebar**: γ, θ, max iterations, DP method, slip probability, step/goal/trap reward, grid
-  regeneration (slippery-cell count, random seed).
+- **Task**: known-model 10×10 `GridWorld` on a **static, hand-designed board** (not procedurally
+  regenerated): 13 wall cells scattered across 5 small clusters (not one corridor — generated via
+  a seeded random-cluster scatter, then validated for reachability/connectivity and frozen),
+  three traps, ten slippery cells (slip probability `p_slip`: intended action succeeds, otherwise
+  a random action is substituted), one start cell, one high-reward goal cell. Moving into a wall
+  or off the edge of the board is illegal — the agent simply doesn't move. The board's
+  *structure* is fixed; its *parameters* (rewards, slip probability, γ) stay fully tunable from
+  the sidebar — see SPRINTS.md Sprint 2 for the exact layout and reasoning.
+- **Reward model**: **no step reward.** `R(s,a,s')=0` for every non-terminal transition — only
+  entering the goal or a trap yields a nonzero reward. With `goal_reward` set high and γ<1, V(s)
+  still naturally encodes "closer is better" purely from discounting (`V(s) ≈ γ^d·goal_reward`),
+  so there's no need for an artificial per-step cost to make the agent hurry — γ alone controls
+  how fast V decays away from the goal, which is the point of the room.
+- **Algorithm**: sidebar choice of **Value Iteration** or **Policy Iteration**, both directly
+  implementing the Bellman equation over `transition_model()` — no environment interaction
+  needed, "training" = Bellman sweeps to convergence (`max|ΔV| < θ`). Value Iteration applies the
+  Bellman *optimality* equation (`V(s) ← max_a Σ P(s'|s,a)[R + γV(s')]`); Policy Iteration
+  alternates the Bellman *expectation* equation (evaluate the current policy) with greedy
+  improvement.
+- **Sidebar**: γ (0.5-1.0), θ, max iterations, DP method, slip probability, goal/trap reward (no
+  step reward, no grid-regeneration controls — the board is static by design).
 - **Train tab**: Δ V per iteration (log-scale), iterations-to-converge, V-heatmap snapshot per
   iteration (cheap to store all of them — DP converges in well under 100 sweeps).
 - **Board tab**: grid heatmap (V) + policy arrows; slider over *iteration number* (not episodes)
@@ -283,8 +304,9 @@ the in-app Info tab and as project documentation — no duplication.
 ## 6. Stretch / Phase-2 features (after all 6 rooms work end-to-end)
 
 Optional, off-by-default toggles, available across the grid rooms (1–4) and noted as the spec's
-"can add dynamic components" line — not required for the core deliverable:
-- **Traps**: extra terminal-failure cells beyond the base slippery/goal setup.
+"can add dynamic components" line — not required for the core deliverable. Note: Room 1 already
+ships with traps and wall barriers as core, static-board features (see §4) — they're listed here
+only in case Rooms 2-4 want *additional* or *randomized* versions of the same idea:
 - **Bonus tiles**: a one-time pickup reward at a fixed or random cell.
 - **Shortcut tiles**: teleport to another cell (a cheap way to create an interesting non-obvious
   optimal path).
