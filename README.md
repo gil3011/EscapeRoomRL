@@ -27,6 +27,13 @@ python -m venv .venv
 
 The app opens at http://localhost:8501.
 
+> **Always use `.venv\Scripts\streamlit`, not a bare `streamlit` command.** If another Python
+> install on your machine has `streamlit` on `PATH`, a bare `streamlit run app.py` will silently
+> run *that* version instead of this project's pinned one — and on an older Streamlit, newer
+> widget parameters fail with a `TypeError` deep in a page's `st.button`/`st.plotly_chart` calls.
+> If you ever hit that, check `streamlit version` against `requirements.txt` before debugging the
+> page code itself.
+
 ## Run tests
 
 ```bash

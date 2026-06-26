@@ -53,8 +53,8 @@ with st.sidebar:
         max_attempt_steps = st.slider("Max attempt steps", 20, 300, 150, 10)
 
     col1, col2 = st.columns(2)
-    solve_clicked = col1.button("▶ Solve", width="stretch")
-    reset_clicked = col2.button("🔄 Reset", width="stretch")
+    solve_clicked = col1.button("▶ Solve", use_container_width=True)
+    reset_clicked = col2.button("🔄 Reset", use_container_width=True)
 
 if reset_clicked:
     for key, value in defaults.items():
@@ -114,9 +114,9 @@ with tab_train:
         c5.metric("Speedup", speedup)
 
         st.plotly_chart(line_chart({"max|ΔV|": deltas}, title="Convergence", log_y=True),
-                         width="stretch")
+                         use_container_width=True)
         st.plotly_chart(line_chart({"policy changes": policy_changes}, title="Policy stability"),
-                         width="stretch")
+                         use_container_width=True)
 
         st.subheader("Recent iterations")
         n = min(20, len(history))
@@ -124,7 +124,7 @@ with tab_train:
             "Iteration": list(range(len(history) - n + 1, len(history) + 1)),
             "max|ΔV|": [f"{d:.2e}" for d in deltas[-n:]],
             "Policy changes": policy_changes[-n:],
-        }, width="stretch", hide_index=True)
+        }, use_container_width=True, hide_index=True)
 
 with tab_board:
     history = st.session_state[f"{ROOM_ID}_history"]
@@ -141,7 +141,7 @@ with tab_board:
             snap = history[idx]
             fig = render_grid(grid, values=snap["V"], policy=snap["policy"],
                                title=f"Iteration {idx + 1}/{len(history)}")
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
         else:
             if st.button("🏁 Run escape attempt"):
                 path, steps, success = run_episode(grid, final_policy, max_attempt_steps)
@@ -160,7 +160,7 @@ with tab_board:
                 step_idx = st.slider("Step", 0, len(path) - 1, len(path) - 1)
                 fig = render_grid(grid, values=history[-1]["V"], policy=final_policy,
                                    agent_pos=path[step_idx], title="Escape attempt")
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Steps taken", st.session_state[f"{ROOM_ID}_attempt_steps"])

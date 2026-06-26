@@ -29,4 +29,9 @@
   exceptions). Sanity numbers on the default config: converges in 23 iterations; optimal policy
   averages ~18.2 steps to the goal across 200 stochastic trials (slip_prob=0.2) with a 100%
   success rate, against a ~151-step random-walk baseline — Escape Score ≈ 880.
+- **Fix**: `st.button`/`st.plotly_chart`/`st.dataframe` calls used the newer `width=` parameter,
+  which doesn't exist on Streamlit 1.43 — only on this project's pinned 1.58 (`.venv`). A second
+  Streamlit install on `PATH` (a different Python on this machine) hit that gap and crashed on
+  Room 1's first button. Reverted to `use_container_width=True`, which works on both; verified
+  against both Python installs. README now calls out always using `.venv\Scripts\streamlit`.
 - Next: **Sprint 3** — Room 2 (Monte Carlo).
