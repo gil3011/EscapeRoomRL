@@ -55,4 +55,18 @@
     (~18); Escape Score for a good run is now closer to 950-960.
   - Added 5 tests covering the new behavior (non-terminal trap, wall-bump exclusion, every open
     cell has a legal action); full suite is 22/22 passing.
+- **Scoring redesign**: replaced the invented "Escape Score" (par_steps vs. a random-walk
+  baseline) with the two standard RL quantities instead, per feedback — `expected_steps_to_absorption`,
+  `uniform_policy_dist`, and `greedy_policy_dist` are deleted (no remaining callers).
+  - **V(start)** — `history[-1]["V"][grid.start]`, already sitting in the solve output. Shown on
+    the Train tab as the headline "score of the training."
+  - **G** — the realized discounted return of one escape-attempt rollout
+    (`engine.scoring.discounted_return(rewards, gamma)`). Required widening
+    `run_episode()`'s return to `(path, rewards, steps_taken, success)` so there's something to
+    discount, using the *same* gamma the room was solved with (stashed at solve time, not
+    re-read from a possibly-since-moved slider).
+  - `runs/<room_id>/best.json`'s field is now `G` (was `score`); lobby shows "Best G".
+  - Verified via `pytest` (25/25, including a new `tests/test_scoring.py`) and `AppTest`: on the
+    default config, V(start) ≈ 16.04 and one escape attempt's G ≈ 16.68 — close, as expected,
+    since G is one stochastic sample of what V predicts on average.
 - Next: **Sprint 3** — Room 2 (Monte Carlo).

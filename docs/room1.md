@@ -83,14 +83,22 @@ slippery cell — that's the ice being unpredictable, not the policy making a ba
 
 Goal reward is intentionally **not** in this list — it's fixed (shown read-only in the sidebar).
 
-### Scoring
+### Scoring — G and V
 
-The **Escape Score** shown after an escape attempt compares the steps actually taken against
-`par_steps` — the expected number of steps a *uniformly random* policy would take to reach the
-goal on this exact board. Since traps don't end the episode, the only thing a random walk can
-end on is the goal itself — which, undirected, typically takes hundreds of steps on this board,
-making a trained policy's score climb close to 1000. Only timing out without reaching the goal
-scores 0; wandering through a trap along the way still counts as success if the goal is reached
-within the step limit, just with a reward penalty already paid. The Train tab also shows the
-*optimal* policy's own expected steps next to the random baseline, so you can see directly how
-much better-than-random the solved policy is.
+Two numbers, not one made-up score:
+
+- **V(start)** (Train tab) is the trained value function's own estimate at the start cell — the
+  expected discounted return under the optimal policy, straight out of the Bellman equation.
+  This is the score *of the training itself*: it doesn't depend on any one rollout, only on
+  having solved the room.
+- **G** (Board tab, after an escape attempt) is the actual discounted return collected during
+  that *one specific* stochastic rollout: `G = sum_t gamma^t * r_t`. Because slip makes every
+  rollout a little different, G will bounce around from attempt to attempt — sometimes a bit
+  above V (a lucky run with no slip detours), sometimes a bit below (an unlucky one that grazed
+  a trap or took the long way). That's expected: V is an *average* over all the randomness, G is
+  *one sample* of it. Watching G cluster around V across a few attempts is itself a sanity check
+  that the value function is correct.
+
+Because reward is discounted by `gamma` every step, reaching the goal sooner keeps more of the
+(large, discounted-less) goal reward — a faster escape already shows up as a higher G with no
+separate bookkeeping needed.

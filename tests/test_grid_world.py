@@ -1,4 +1,4 @@
-from engine.grid_world import DOWN, LEFT, RIGHT, UP, GridWorld, random_layout
+from engine.grid_world import DOWN, LEFT, RIGHT, UP, GridWorld, random_layout, run_episode
 
 
 def test_reset_returns_start():
@@ -98,6 +98,26 @@ def test_random_layout_avoids_start_and_goal():
     assert len(walls) == 3
     assert len(slippery) == 8
     assert len(traps) == 2
+
+
+def test_run_episode_returns_rewards_alongside_the_path():
+    g = GridWorld(size=2, start=(0, 0), goal=(0, 1), goal_reward=5.0, step_reward=0.0,
+                  slip_prob=0.0)
+    policy = {(0, 0): RIGHT}
+    path, rewards, steps, success = run_episode(g, policy, max_steps=10)
+    assert path == [(0, 0), (0, 1)]
+    assert rewards == [5.0]
+    assert steps == 1
+    assert success is True
+
+
+def test_run_episode_times_out_without_reaching_goal():
+    g = GridWorld(size=3, start=(0, 0), goal=(2, 2), slip_prob=0.0)
+    policy = {s: UP for s in g.all_states()}  # always bounces against the top edge
+    path, rewards, steps, success = run_episode(g, policy, max_steps=5)
+    assert steps == 5
+    assert success is False
+    assert len(rewards) == 5
 
 
 def test_step_after_terminal_raises():

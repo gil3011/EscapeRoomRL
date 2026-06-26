@@ -1,13 +1,16 @@
-"""Escape Score — a display/leaderboard metric computed only at evaluation time.
+"""G and V — the two numbers used to judge how well a room's agent is doing.
 
-Distinct from the training reward (see plan.md §2.2): a faster solve already earns more
-training reward because every step costs a little, so this score is never fed back into
-training. It only exists to be shown on a room's Board tab and the lobby scoreboard.
+G is the realized, discounted return of one specific episode: "how much reward did
+THIS run actually get?" V is the value function learned during training (or its
+model-free analogue, max_a Q(s,a)): "how much reward did training predict this state
+is worth?" Comparing a sampled G against the trained V is the standard way to sanity
+-check a learned value function — no separate display-only score needed. Because
+reward is discounted by gamma each step, a faster episode keeps more of a delayed
+goal reward, so a faster solve already shows up as a higher G with no extra
+bookkeeping (see plan.md §2.2).
 """
 
 
-def escape_score(steps_taken: int, par_steps: int, success: bool) -> int:
-    """0-1000: 1000 for an instant exit, 0 for failure (timeout/trap/collision)."""
-    if not success or steps_taken <= 0 or par_steps <= 0:
-        return 0
-    return max(0, round(1000 * (1 - steps_taken / par_steps)))
+def discounted_return(rewards: list[float], gamma: float) -> float:
+    """G = sum_t gamma^t * r_t, for one episode's sequence of rewards."""
+    return sum((gamma ** t) * r for t, r in enumerate(rewards))

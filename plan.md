@@ -43,26 +43,26 @@ but are not "the exit." This satisfies the spec's "single terminal state that al
 the next room" without forbidding failure states. Note: a "trap" isn't automatically one of
 these — in Room 1, traps are a costly *non-terminal* hazard, not a failure state (see §4).
 
-### 2.2 Reward (training signal) vs. Escape Score (display/leaderboard)
-Two distinct numbers, not to be confused:
-- **Reward** is the per-step/episode signal the algorithm actually learns from (e.g. a small
-  negative step cost + a terminal bonus/penalty). Because every step costs a little, a faster
-  solve already yields a higher return — "faster = more reward" falls out naturally and needs
-  no special-casing.
-- **Escape Score** is a derived, user-facing number computed only at *evaluation* time (a single
-  greedy rollout, ε=0), from steps-to-exit (grid rooms) or simulated time-to-exit (continuous
-  rooms): `score = round(1000 * max(0, 1 - steps_taken / par_steps))`, clipped to 0 on
-  failure/timeout. This is the number shown on the Board tab and the lobby leaderboard — it is
-  never fed back into training.
-- **`par_steps` convention**: the expected steps-to-goal under a *uniform-random* policy on that
-  room's environment — not the optimal policy's own hitting time. Scoring a trained run against
-  "how a random walker would do" is what makes a good policy's score actually look good (close
-  to 1000); comparing the agent to itself would make every well-trained run score near 0. For
-  the grid rooms (1-4) this is computed exactly via `engine/dp_solver.expected_steps_to_absorption`,
-  reusing the known transition model purely for *scoring* even in rooms whose *training*
-  algorithm doesn't get to see that model (worked example: Room 1 in SPRINTS.md). Continuous
-  rooms (5-6) have no tabular model to solve exactly, so they'll need a simulated-rollout
-  approximation instead — revisit when those sprints come up.
+### 2.2 Scoring: G (one episode's return) vs. V (the trained value estimate)
+No invented "Escape Score" — every room reports the same two standard RL quantities instead:
+- **G** — the realized, discounted return of *one specific* rollout:
+  `G = sum_t gamma^t * r_t`. Computed post-hoc from whatever rewards a single escape-attempt
+  episode actually received (`engine/scoring.discounted_return(rewards, gamma)`). Because reward
+  is discounted every step, reaching the goal sooner keeps more of a delayed goal reward, so a
+  faster solve already shows up as a higher G — "faster = more reward" falls out naturally,
+  no special-casing needed. Shown on the Board tab after an escape attempt, and persisted as the
+  per-room "best" score (`runs/<room_id>/best.json`, field `G`) for the lobby leaderboard.
+- **V** — what training predicts the start state is worth: the learned value function's
+  estimate, or its model-free analogue `max_a Q(s,a)` for rooms that only learn Q. Shown on the
+  Train tab as the headline "score of the training" — it doesn't depend on any one rollout, only
+  on having trained the room. For Room 1 (DP) this is exact, straight from the Bellman equation;
+  Rooms 2-4 (MC/SARSA/Q-learning) derive it from the learned Q-table; Rooms 5-6 (DQN) derive it
+  from the network's own output at the start state.
+- **Why both**: V is an average over all the randomness a stochastic environment can produce; G
+  is one sample of it. A few escape attempts' G values clustering around V is itself a sanity
+  check that the learned value function is accurate — comparing a sample to its own prediction is
+  more informative (and more standard) than comparing a trained run to an arbitrary baseline.
+  Neither number is fed back into training; both are purely for display.
 
 ### 2.3 Training run lifecycle
 Every room's Train tab follows the same convention (copied from the LunarLander example):
@@ -84,8 +84,8 @@ closing and reopening the app doesn't lose progress — this is an explicit requ
 
 ### 2.6 Lobby & free navigation
 `app.py` is a lobby page built with `st.navigation`/`st.Page`: a short explanation of the game,
-a table of all 6 rooms with their algorithm and best saved Escape Score, and links into each
-room. Rooms are always unlocked.
+a table of all 6 rooms with their algorithm and best saved G, and links into each room. Rooms
+are always unlocked.
 
 ## 3. Architecture
 
@@ -120,8 +120,8 @@ EscapeRoomRL/
 │   ├── q_learning_agent.py
 │   ├── dqn_agent.py                 # adapted from code examples/dql/dqn.py
 │   ├── training_runner.py          # shared thread + queue + snapshot runner
-│   ├── scoring.py                   # Escape Score formula
-│   └── storage.py                   # save/load runs, checkpoints, best scores
+│   ├── scoring.py                   # G (discounted_return) — the V half lives in each room's solver
+│   └── storage.py                   # save/load runs, checkpoints, best G per room
 ├── ui/
 │   ├── sidebar_helpers.py
 │   ├── charts.py
@@ -168,8 +168,9 @@ requirement as something that grows with the project rather than being written o
 
 Common page layout for every room (per the spec): **sidebar** (all algorithm + environment +
 training-run parameters, Train/Stop/Reset) and three tabs — **Info** (renders `docs/roomN.md`),
-**Train** (live metrics + Plotly learning curves + recent-episode table), **Board** (rendered
-room, checkpoint replay slider, "▶ Run escape attempt" with Escape Score).
+**Train** (live metrics + Plotly learning curves + recent-episode table + V, the score of the
+training), **Board** (rendered room, checkpoint replay slider, "▶ Run escape attempt" reporting
+G next to V for comparison).
 
 | # | Name | Algorithm | Model | State space | Action space |
 |---|---|---|---|---|---|
@@ -277,7 +278,7 @@ room, checkpoint replay slider, "▶ Run escape attempt" with Escape Score).
   example.
 - **Board tab**: animated `(x,y)` trajectory with a velocity arrow, start marker, goal zone,
   room boundary; checkpoint replay slider; "Run escape attempt" reports time-to-exit in seconds
-  (`steps × 0.02`) and Escape Score.
+  (`steps × 0.02`), G for that rollout, and V(start) (≈ `max_a Q(start, a)`) for comparison.
 
 ### Room 6 — The Obstacle Gauntlet (dynamic obstacles)
 - **Task**: Room 5's `ContinuousWorld` + a list of circular obstacles (diameter 0.5 m, i.e.
@@ -301,15 +302,15 @@ room, checkpoint replay slider, "▶ Run escape attempt" with Escape Score).
   current sensing radius `L`, so the partial-observability window is literally visible. Adds
   the spec's explicit end-of-training feature: a **"🎲 Generate random room & test"** button
   that procedurally builds a fresh, never-trained-on layout and runs the frozen learned policy
-  on it with no further learning, reporting success/collision/timeout and Escape Score — the
-  generalization test called out in the spec.
+  on it with no further learning, reporting success/collision/timeout and G — the generalization
+  test called out in the spec.
 
 ## 5. Info tab content (docs/roomN.md)
 
 Each file covers, briefly: what the room's task is; which algorithm runs and the one-paragraph
 intuition for it; what's known vs. unknown about the environment; the full parameter glossary
-for that room's sidebar; and the Escape Score formula/par value used. Written once, reused by
-the in-app Info tab and as project documentation — no duplication.
+for that room's sidebar; and how that room derives V from what it learns. Written once, reused
+by the in-app Info tab and as project documentation — no duplication.
 
 ## 6. Stretch / Phase-2 features (after all 6 rooms work end-to-end)
 

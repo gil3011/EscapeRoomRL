@@ -1,8 +1,8 @@
 """EscapeRoomRL — lobby page.
 
 Six rooms, one RL algorithm each, increasing in difficulty. Every room is reachable any
-time from the sidebar nav; this page just shows what each room is and its best saved
-Escape Score so far. See plan.md for the full design and SPRINTS.md for the build plan.
+time from the sidebar nav; this page just shows what each room is and its best saved G
+(episode return) so far. See plan.md for the full design and SPRINTS.md for the build plan.
 """
 import streamlit as st
 
@@ -34,7 +34,7 @@ def lobby() -> None:
             st.markdown(f"**{icon} {title}**")
             best = load_best(room_id)
             if best:
-                st.metric("Best score", best["score"])
+                st.metric("Best G", f"{best['G']:.1f}")
             else:
                 st.caption("Not trained yet")
 

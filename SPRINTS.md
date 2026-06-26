@@ -28,16 +28,16 @@ since their physics/observation logic is worth validating before any training is
 **Depends on**: nothing.
 
 Backlog:
-- [ ] `git init`, `.gitignore`, `requirements.txt` (streamlit, numpy, plotly, pandas — torch added in Sprint 6)
-- [ ] Folder structure per plan.md §3.2
-- [ ] `engine/grid_world.py` — `GridWorld` mechanics (movement, walls, slip, terminal states, `transition_model()`); rooms 1-4 all need this immediately
-- [ ] `engine/training_runner.py` — shared thread + queue + snapshot runner
-- [ ] `engine/storage.py` — save/load runs, checkpoints, best score to `runs/<room_id>/`
-- [ ] `engine/scoring.py` — Escape Score formula
-- [ ] `ui/sidebar_helpers.py`, `ui/charts.py`, `ui/grid_render.py` skeletons
-- [ ] `app.py` — lobby page, `st.navigation` registering all 6 rooms (placeholders for now)
-- [ ] `README.md` skeleton, `PROGRESS.md` started
-- [ ] `tests/test_grid_world.py`
+- [x] `git init`, `.gitignore`, `requirements.txt` (streamlit, numpy, plotly, pandas — torch added in Sprint 6)
+- [x] Folder structure per plan.md §3.2
+- [x] `engine/grid_world.py` — `GridWorld` mechanics (movement, walls, slip, terminal states, `transition_model()`); rooms 1-4 all need this immediately
+- [x] `engine/training_runner.py` — shared thread + queue + snapshot runner
+- [x] `engine/storage.py` — save/load runs, checkpoints, best G to `runs/<room_id>/`
+- [x] `engine/scoring.py` — G (`discounted_return`); V comes from each room's own solver, not this module
+- [x] `ui/sidebar_helpers.py`, `ui/charts.py`, `ui/grid_render.py` skeletons
+- [x] `app.py` — lobby page, `st.navigation` registering all 6 rooms (placeholders for now)
+- [x] `README.md` skeleton, `PROGRESS.md` started
+- [x] `tests/test_grid_world.py`
 
 **Definition of Done**: `streamlit run app.py` launches and shows the lobby listing all 6 rooms
 (placeholders OK); `GridWorld` unit tests pass; first git commit made.
@@ -117,39 +117,29 @@ shape. Both methods are literally the Bellman equation, just two different uses 
   state's action changes.
 - Both return the **full per-iteration history** (cheap — 10x10 converges in well under 100
   sweeps): `[{"V": {...}, "policy": {...}, "delta": float, "policy_changes": int}, ...]`.
-- `expected_steps_to_absorption(model, states, policy_dist, theta, max_iterations)` — **new**,
-  not in the examples, but the same fixed-point sweep technique repurposed for a different
-  recursion: `T(s) = 1 + Σ_a π(s,a) Σ_s' P(s'|s,a)·T(s')`, undiscounted (γ=1 — we want a literal
-  expected step count, not a discounted return). Kept the general "to absorption" name (rather
-  than "to goal") even though Room 1's only terminal is now the goal — the function still works
-  correctly for any number of terminal states, which matters if a later room has a real one.
-  Used twice: once with a uniform-random policy (→ the scoring baseline below) and once with the
-  learned greedy policy (→ an "optimal expected steps" metric shown next to it).
 
 **Architecture note**: DP on 100 states converges in milliseconds, so Room 1 does **not** use
 Sprint 1's `TrainingRunner` background thread — clicking solve runs synchronously and the full
 iteration history is available immediately. The generic 3-button Start/Stop/Reset convention
 becomes 2 buttons here (**▶ Solve**, **🔄 Reset** — no "Stop", there's nothing to stop).
 
-### Scoring
-`engine/scoring.py`'s `escape_score(steps_taken, par_steps, success)` from Sprint 1 is reused
-unchanged. **`par_steps`** = expected steps-to-absorption under a **uniform-random policy** on
-this board (via `expected_steps_to_absorption`) — *not* the optimal policy's own hitting time.
-Scoring a trained run against "how a random walker would do" is what makes a good policy's score
-actually look good (close to 1000); comparing the agent to its own optimal time would make every
-well-trained run score near 0. Since traps no longer end the episode, a random walk's *only* way
-to finish is to stumble onto the goal — undirected, that now takes ~500 steps on this board (up
-from ~150 when traps still cut some walks short), making the trained policy's advantage even
-more dramatic. Computed once at startup (the board is static, so this never needs recomputing),
-shown in the sidebar as a reference ("Par — random baseline: ~N steps"). The same convention
-carries over to Rooms 2-4 later.
+### Scoring — G and V, not a made-up Escape Score
+Per your steer, dropped the par_steps/random-baseline "Escape Score" idea (and with it,
+`expected_steps_to_absorption`, `uniform_policy_dist`, `greedy_policy_dist` — all deleted, no
+remaining callers) in favor of two standard quantities (see plan.md §2.2):
+- **V(start)** — `history[-1]["V"][grid.start]`, already sitting right there in the solve
+  output. Shown on the Train tab as the headline "score of the training."
+- **G** — the realized discounted return of one escape-attempt rollout:
+  `engine.scoring.discounted_return(rewards, gamma)`. Required widening `run_episode()`'s return
+  signature from `(path, steps_taken, success)` to `(path, rewards, steps_taken, success)` so
+  there's something to discount. Uses the *same* `gamma` the room was solved with (stashed in
+  `st.session_state` at solve time, not re-read from the sidebar, in case the slider moved since
+  — V and G have to share a discount factor to be comparable at all).
 
 A "Run escape attempt" click does **one** stochastic rollout (real slip applies) of the final
-greedy policy, capped at `max_attempt_steps`. `success` = reached the goal specifically (only a
-timeout is a failure now — walking through a trap along the way still counts as success if the
-goal is reached in time, just with the reward penalty already paid). Score =
-`escape_score(steps_taken, par_steps, success)`. Each click is its own attempt; the best
-persists to `runs/room1/best.json` via `storage.save_best_if_higher`.
+greedy policy, capped at `max_attempt_steps`, reporting steps taken / success / G next to the
+already-known V(start) for comparison. `runs/room1/best.json`'s field is now `G` (was `score`);
+`storage.save_best_if_higher` keeps whichever rollout scored the highest G so far.
 
 ### Training parameters (sidebar)
 **Environment** (board structure *and* goal reward are fixed; these are the only two knobs left)
@@ -168,8 +158,7 @@ persists to `runs/room1/best.json` via `storage.save_best_if_higher`.
 
 ### Charts & metrics
 **Train tab**
-- Metrics row: iterations to converge, final max\|ΔV\|, par (random-baseline) steps, optimal
-  expected steps, speedup factor (par ÷ optimal)
+- Metrics row: iterations to converge, final max\|ΔV\|, V(start)
 - Chart 1 — ΔV per iteration, log-scale y (`ui/charts.line_chart`)
 - Chart 2 — # states whose greedy action changed, per iteration (often hits 0 *before* ΔV fully
   converges — worth calling out in `docs/room1.md`)
@@ -179,7 +168,7 @@ persists to `runs/room1/best.json` via `storage.save_best_if_higher`.
 - View toggle: **📊 Iteration snapshot** (slider 0..N, `ui/grid_render.render_grid` shows the
   V-heatmap + policy arrows as of that iteration, no agent marker) vs. **🏁 Escape attempt**
   (click to run one rollout, then a step slider 0..T scrubs `agent_pos` across the same
-  renderer; steps taken / success / Escape Score shown alongside)
+  renderer; steps taken / success / G shown alongside V(start) for comparison)
 
 ### Backlog
 - [x] `engine/boards.py` — `ROOM1_WALLS`/`ROOM1_TRAPS`/`ROOM1_SLIPPERY`/`ROOM1_START`/`ROOM1_GOAL`/
@@ -189,24 +178,25 @@ persists to `runs/room1/best.json` via `storage.save_best_if_higher`.
 - [x] `tests/test_boards.py` — the goal is reachable from the start without passing through a
   wall (BFS); none of walls/traps/slippery/start/goal overlap; every open cell has at least one
   legal action once wall-bumping moves are excluded
-- [x] `engine/dp_solver.py` — `value_iteration`, `policy_iteration`, `expected_steps_to_absorption`
+- [x] `engine/dp_solver.py` — `value_iteration`, `policy_iteration` (Bellman optimality/
+  expectation equations)
 - [x] `tests/test_dp_solver.py` — converges to a hand-checked answer on a tiny grid; with
   `step_reward=0`, V(s) is monotonically non-increasing as hand-picked cells get farther from the
-  goal along a clear path (confirms discounting alone is doing the work); a non-terminal trap
-  along a fixed path doesn't change the expected step count, only the reward
+  goal along a clear path (confirms discounting alone is doing the work)
+- [x] `engine/scoring.py` — `discounted_return(rewards, gamma)` for G; `engine/grid_world.py`'s
+  `run_episode()` widened to also return per-step rewards
 - [x] `pages/1_room1_dynamic_programming.py` — sidebar groups above, Info/Train/Board tabs
 - [x] `docs/room1.md` — theory, the Bellman equation (optimality vs. expectation), known-vs-unknown
-  framing, parameter glossary, explanation of the random-baseline scoring convention
-- [x] `runs/room1/` persistence: history (deltas/policy_changes per iteration), one checkpoint
-  blob holding the full per-iteration `{V, policy}` list, `best.json`
+  framing, parameter glossary, explanation of the G-vs-V scoring convention
+- [x] `runs/room1/` persistence: history (deltas/policy_changes per iteration, `v_start`, `gamma`),
+  one checkpoint blob holding the full per-iteration `{V, policy}` list, `best.json` (field `G`)
 
 **Definition of Done**: every tunable Room 1 parameter works from the sidebar (board structure
-itself stays fixed); clicking Solve shows the ΔV/policy-change curves and the random-vs-optimal
-metrics immediately; any iteration's V/policy can be replayed on the board; an escape attempt
-reports an Escape Score that's clearly high for the trained policy and would be clearly low for
-a random one; the trained policy visibly routes around the trap at (4,6) rather than walking
-into it; reopening the app reloads Room 1's last run from disk; `test_dp_solver.py` and
-`test_boards.py` pass.
+itself stays fixed); clicking Solve shows the ΔV/policy-change curves and V(start) immediately;
+any iteration's V/policy can be replayed on the board; an escape attempt reports G next to
+V(start), with G clustering near V across repeated attempts; the trained policy visibly routes
+around the trap at (4,6) rather than walking into it; reopening the app reloads Room 1's last
+run from disk; `test_dp_solver.py`, `test_boards.py`, and `test_scoring.py` pass.
 **Out of scope**: Rooms 2+ (whether they get their own static board or a procedurally generated
 one is still open); further dynamic extras beyond this room's fixed walls/traps (bonus/shortcut/
 patrol-enemy tiles → §6 stretch in plan.md).
@@ -332,7 +322,7 @@ Backlog:
 
 **Definition of Done**: trains to a policy that reaches the goal while avoiding obstacles
 meaningfully more often than a random policy; the random-room button runs the frozen policy on
-a fresh layout and reports outcome + Escape Score.
+a fresh layout and reports outcome + G.
 **Out of scope**: stretch features (moving obstacles, plan.md §6).
 
 ---

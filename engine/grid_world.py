@@ -118,18 +118,22 @@ class GridWorld:
 
 def run_episode(grid: GridWorld, policy: dict, max_steps: int = 200):
     """Roll out a deterministic policy from grid.reset() until a terminal state or
-    max_steps. Returns (path, steps_taken, success); path includes the start state
-    and every state visited after it. success means the goal specifically was
-    reached (not a trap or timeout). Shared by Rooms 1-4's escape attempts.
+    max_steps. Returns (path, rewards, steps_taken, success); path includes the
+    start state and every state visited after it, rewards is the reward received at
+    each step (so len(rewards) == steps_taken, one shorter than path). success means
+    the goal specifically was reached (not a timeout). Shared by Rooms 1-4's escape
+    attempts; rewards lets the caller compute G = discounted_return(rewards, gamma).
     """
     state = grid.reset()
     path = [state]
+    rewards = []
     for _ in range(max_steps):
-        state, _reward, done, _info = grid.step(policy[state])
+        state, reward, done, _info = grid.step(policy[state])
         path.append(state)
+        rewards.append(reward)
         if done:
-            return path, len(path) - 1, state == grid.goal
-    return path, max_steps, False
+            return path, rewards, len(rewards), state == grid.goal
+    return path, rewards, max_steps, False
 
 
 def random_layout(
