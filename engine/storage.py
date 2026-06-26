@@ -1,12 +1,13 @@
 """Disk persistence for training runs, shared by every room.
 
 Layout per room:
-    runs/<room_id>/history.json            per-episode/iteration metrics
+    runs/<room_id>/history.json            per-episode/iteration metrics (incl. v_start)
     runs/<room_id>/checkpoints/<tag>.pkl   periodic policy/Q-table/weights snapshots
-    runs/<room_id>/best.json               best G (episode return) seen so far
 
 Lets a room's Train/Board tabs reload past results after the app restarts, instead of
-only living in st.session_state for the current run.
+only living in st.session_state for the current run. The lobby reads each room's
+history.json directly for V(start) — there's no separate "best run" file, since V
+doesn't fluctuate the way a single rollout's G does.
 """
 from __future__ import annotations
 
@@ -52,19 +53,3 @@ def load_checkpoint(room_id: str, tag: str):
 def list_checkpoints(room_id: str) -> list[str]:
     d = room_dir(room_id) / "checkpoints"
     return sorted((p.stem for p in d.glob("*.pkl")), key=lambda t: (len(t), t))
-
-
-def load_best(room_id: str) -> dict | None:
-    path = room_dir(room_id) / "best.json"
-    if not path.exists():
-        return None
-    with open(path) as f:
-        return json.load(f)
-
-
-def save_best_if_higher(room_id: str, G: float, steps: int, success: bool) -> None:
-    current = load_best(room_id)
-    if current is not None and current["G"] >= G:
-        return
-    with open(room_dir(room_id) / "best.json", "w") as f:
-        json.dump({"G": G, "steps": steps, "success": success}, f)

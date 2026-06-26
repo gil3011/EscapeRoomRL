@@ -128,18 +128,23 @@ Per your steer, dropped the par_steps/random-baseline "Escape Score" idea (and w
 `expected_steps_to_absorption`, `uniform_policy_dist`, `greedy_policy_dist` — all deleted, no
 remaining callers) in favor of two standard quantities (see plan.md §2.2):
 - **V(start)** — `history[-1]["V"][grid.start]`, already sitting right there in the solve
-  output. Shown on the Train tab as the headline "score of the training."
+  output. Saved in `runs/room1/history.json` (field `v_start`) every solve. Shown on the Train
+  tab as the headline "score of the training," **and** on the lobby scoreboard — V is stable and
+  reproducible for a given config, which is why it's the one that belongs on a leaderboard, not G.
 - **G** — the realized discounted return of one escape-attempt rollout:
   `engine.scoring.discounted_return(rewards, gamma)`. Required widening `run_episode()`'s return
   signature from `(path, steps_taken, success)` to `(path, rewards, steps_taken, success)` so
   there's something to discount. Uses the *same* `gamma` the room was solved with (stashed in
   `st.session_state` at solve time, not re-read from the sidebar, in case the slider moved since
-  — V and G have to share a discount factor to be comparable at all).
+  — V and G have to share a discount factor to be comparable at all). Shown only on Room 1's own
+  Board tab, next to V, for that one rollout — not persisted as a "best," since it's one noisy
+  sample rather than a stable property of the room. (`save_best_if_higher`/`load_best`/
+  `best.json` were briefly added for this, then removed once the lobby moved to V — no remaining
+  callers.)
 
 A "Run escape attempt" click does **one** stochastic rollout (real slip applies) of the final
 greedy policy, capped at `max_attempt_steps`, reporting steps taken / success / G next to the
-already-known V(start) for comparison. `runs/room1/best.json`'s field is now `G` (was `score`);
-`storage.save_best_if_higher` keeps whichever rollout scored the highest G so far.
+already-known V(start) for comparison.
 
 ### Training parameters (sidebar)
 **Environment** (board structure *and* goal reward are fixed; these are the only two knobs left)
@@ -188,8 +193,9 @@ already-known V(start) for comparison. `runs/room1/best.json`'s field is now `G`
 - [x] `pages/1_room1_dynamic_programming.py` — sidebar groups above, Info/Train/Board tabs
 - [x] `docs/room1.md` — theory, the Bellman equation (optimality vs. expectation), known-vs-unknown
   framing, parameter glossary, explanation of the G-vs-V scoring convention
-- [x] `runs/room1/` persistence: history (deltas/policy_changes per iteration, `v_start`, `gamma`),
-  one checkpoint blob holding the full per-iteration `{V, policy}` list, `best.json` (field `G`)
+- [x] `runs/room1/` persistence: history (deltas/policy_changes per iteration, `v_start`, `gamma`
+  — the lobby reads `v_start` straight from this file), one checkpoint blob holding the full
+  per-iteration `{V, policy}` list
 
 **Definition of Done**: every tunable Room 1 parameter works from the sidebar (board structure
 itself stays fixed); clicking Solve shows the ΔV/policy-change curves and V(start) immediately;
@@ -332,7 +338,8 @@ a fresh layout and reports outcome + G.
 **Depends on**: Sprints 2-9 all done.
 
 Backlog:
-- [ ] Lobby page: real scoreboard reading every room's `best.json`, replacing Sprint 1's placeholders
+- [ ] Lobby page: real scoreboard reading every room's `history.json` for V(start), replacing
+  Sprint 1's placeholders
 - [ ] Full docs pass (`README.md`, all `docs/roomN.md`, `PROGRESS.md`)
 - [ ] Optional: any plan.md §6 stretch toggles still wanted (traps/bonus/shortcut/patrol-enemy on rooms 1-4, moving obstacles on room 6)
 - [ ] `/code-review` pass before calling it done

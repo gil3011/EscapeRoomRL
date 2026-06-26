@@ -50,10 +50,12 @@ No invented "Escape Score" — every room reports the same two standard RL quant
   episode actually received (`engine/scoring.discounted_return(rewards, gamma)`). Because reward
   is discounted every step, reaching the goal sooner keeps more of a delayed goal reward, so a
   faster solve already shows up as a higher G — "faster = more reward" falls out naturally,
-  no special-casing needed. Shown on the Board tab after an escape attempt, and persisted as the
-  per-room "best" score (`runs/<room_id>/best.json`, field `G`) for the lobby leaderboard.
+  no special-casing needed. Shown on the Board tab after an escape attempt; not persisted as a
+  "best" anywhere, since it's one noisy sample, not a stable measure of the room.
 - **V** — what training predicts the start state is worth: the learned value function's
-  estimate, or its model-free analogue `max_a Q(s,a)` for rooms that only learn Q. Shown on the
+  estimate, or its model-free analogue `max_a Q(s,a)` for rooms that only learn Q. Saved in
+  `runs/<room_id>/history.json` (field `v_start`) every solve, and that's what the **lobby
+  scoreboard** reads — V is stable and reproducible for a given config, unlike G. Shown on the
   Train tab as the headline "score of the training" — it doesn't depend on any one rollout, only
   on having trained the room. For Room 1 (DP) this is exact, straight from the Bellman equation;
   Rooms 2-4 (MC/SARSA/Q-learning) derive it from the learned Q-table; Rooms 5-6 (DQN) derive it
@@ -84,8 +86,8 @@ closing and reopening the app doesn't lose progress — this is an explicit requ
 
 ### 2.6 Lobby & free navigation
 `app.py` is a lobby page built with `st.navigation`/`st.Page`: a short explanation of the game,
-a table of all 6 rooms with their algorithm and best saved G, and links into each room. Rooms
-are always unlocked.
+a table of all 6 rooms with their algorithm and trained V(start), and links into each room.
+Rooms are always unlocked.
 
 ## 3. Architecture
 

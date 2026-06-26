@@ -1,12 +1,13 @@
 """EscapeRoomRL — lobby page.
 
 Six rooms, one RL algorithm each, increasing in difficulty. Every room is reachable any
-time from the sidebar nav; this page just shows what each room is and its best saved G
-(episode return) so far. See plan.md for the full design and SPRINTS.md for the build plan.
+time from the sidebar nav; this page just shows what each room is and its trained V(start)
+so far — the score of the training itself, not any one noisy rollout's G. See plan.md for
+the full design and SPRINTS.md for the build plan.
 """
 import streamlit as st
 
-from engine.storage import load_best
+from engine.storage import load_history
 
 st.set_page_config(page_title="EscapeRoomRL", page_icon="🔑", layout="wide")
 
@@ -32,9 +33,9 @@ def lobby() -> None:
     for col, (room_id, _, title, icon) in zip(cols, ROOMS):
         with col:
             st.markdown(f"**{icon} {title}**")
-            best = load_best(room_id)
-            if best:
-                st.metric("Best G", f"{best['G']:.1f}")
+            history = load_history(room_id)
+            if history and "v_start" in history:
+                st.metric("V(start)", f"{history['v_start']:.2f}")
             else:
                 st.caption("Not trained yet")
 

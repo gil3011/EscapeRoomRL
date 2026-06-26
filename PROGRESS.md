@@ -69,4 +69,20 @@
   - Verified via `pytest` (25/25, including a new `tests/test_scoring.py`) and `AppTest`: on the
     default config, V(start) ≈ 16.04 and one escape attempt's G ≈ 16.68 — close, as expected,
     since G is one stochastic sample of what V predicts on average.
+- **Board colors + lobby metric (post-review feedback)**:
+  - `ui/grid_render.py`: the heatmap used `Blues`, the same hue as the slippery-cell overlay —
+    swapped to `Oranges` so the continuous V signal never competes with a categorical marker.
+    Also found and fixed a real bug while at it: the goal cell's stored V is always 0 (terminal
+    states are never updated by the solver), so it was rendering as the *lowest*-value cell on
+    the heatmap — it now gets its own solid green marker instead, like walls already had. Start
+    is now purple (was green, clashing with the new goal marker) and the replayed agent position
+    is rendered as a top-layer annotation rather than a separate trace, so it can never be
+    visually hidden under a wall/goal/trap overlay mid-replay.
+  - Lobby now shows **V(start)** per room instead of "Best G" — V is stable for a given config,
+    G is one noisy rollout sample, so V is the one that belongs on a leaderboard. Since nothing
+    else ever read `best.json`, `save_best_if_higher`/`load_best` are now dead code — removed
+    (G is still shown on Room 1's own Board tab, just not tracked as a "best").
+  - Verified via `pytest` (25/25, unaffected) and `AppTest` (lobby + full Room 1 flow, zero
+    exceptions); visual color check left to you on the already-running app, since you already
+    had it open.
 - Next: **Sprint 3** — Room 2 (Monte Carlo).

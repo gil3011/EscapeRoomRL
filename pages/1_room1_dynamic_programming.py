@@ -7,7 +7,7 @@ from engine.boards import ROOM1_GOAL_REWARD, make_room1_grid
 from engine.dp_solver import policy_iteration, value_iteration
 from engine.grid_world import run_episode
 from engine.scoring import discounted_return
-from engine.storage import load_checkpoint, load_history, save_best_if_higher, save_checkpoint, save_history
+from engine.storage import load_checkpoint, load_history, save_checkpoint, save_history
 from ui.charts import line_chart
 from ui.grid_render import render_grid
 
@@ -142,7 +142,6 @@ with tab_board:
                 st.session_state[f"{ROOM_ID}_attempt_steps"] = steps
                 st.session_state[f"{ROOM_ID}_attempt_success"] = success
                 st.session_state[f"{ROOM_ID}_attempt_g"] = G
-                save_best_if_higher(ROOM_ID, G, steps, success)
 
             path = st.session_state[f"{ROOM_ID}_attempt_path"]
             if path is None:
