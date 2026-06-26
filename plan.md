@@ -38,9 +38,10 @@ Two smaller judgment calls, stated here so they're easy to correct later if wron
 
 ### 2.1 Single exit per room
 Every room has exactly one **success-terminal state** (the exit) that advances the narrative.
-Rooms may *also* have failure-terminal states (a trap cell, a collision, a timeout) — those end
-the episode but are not "the exit." This satisfies the spec's "single terminal state that allows
-leaving to the next room" without forbidding failure states.
+Rooms may *also* have failure-terminal states (a collision, a timeout) — those end the episode
+but are not "the exit." This satisfies the spec's "single terminal state that allows leaving to
+the next room" without forbidding failure states. Note: a "trap" isn't automatically one of
+these — in Room 1, traps are a costly *non-terminal* hazard, not a failure state (see §4).
 
 ### 2.2 Reward (training signal) vs. Escape Score (display/leaderboard)
 Two distinct numbers, not to be confused:
@@ -185,22 +186,31 @@ room, checkpoint replay slider, "▶ Run escape attempt" with Escape Score).
   a seeded random-cluster scatter, then validated for reachability/connectivity and frozen),
   three traps, ten slippery cells (slip probability `p_slip`: intended action succeeds, otherwise
   a random action is substituted), one start cell, one high-reward goal cell. Moving into a wall
-  or off the edge of the board is illegal — the agent simply doesn't move. The board's
-  *structure* is fixed; its *parameters* (rewards, slip probability, γ) stay fully tunable from
-  the sidebar — see SPRINTS.md Sprint 2 for the exact layout and reasoning.
-- **Reward model**: **no step reward.** `R(s,a,s')=0` for every non-terminal transition — only
-  entering the goal or a trap yields a nonzero reward. With `goal_reward` set high and γ<1, V(s)
-  still naturally encodes "closer is better" purely from discounting (`V(s) ≈ γ^d·goal_reward`),
-  so there's no need for an artificial per-step cost to make the agent hurry — γ alone controls
-  how fast V decays away from the goal, which is the point of the room.
+  or off the edge of the board is illegal — the agent simply doesn't move, and that action is
+  never even offered to the policy (see Algorithm below). The board's *structure* is fixed; its
+  *parameters* (slip probability, trap reward, γ) stay tunable from the sidebar — see SPRINTS.md
+  Sprint 2 for the exact layout and reasoning.
+- **Traps are not terminal.** Stepping on one costs `trap_reward` but the episode continues —
+  a costly cell to pass through, not an instant failure. Only the goal ends the episode.
+- **Reward model**: **no step reward.** `R(s,a,s')=0` for every transition except entering the
+  goal (always) or a trap (a one-time cost each time it's entered). The goal reward is **fixed
+  at a high value, not exposed in the sidebar** — since it's the only thing (with γ) shaping
+  V(s) across the board, keeping it high keeps that shape visible instead of collapsing toward
+  zero. With γ<1, V(s) still naturally encodes "closer is better" purely from discounting
+  (`V(s) ≈ γ^d·goal_reward`), so there's no need for an artificial per-step cost to make the
+  agent hurry — γ alone controls how fast V decays away from the goal, which is the point of
+  the room.
 - **Algorithm**: sidebar choice of **Value Iteration** or **Policy Iteration**, both directly
   implementing the Bellman equation over `transition_model()` — no environment interaction
   needed, "training" = Bellman sweeps to convergence (`max|ΔV| < θ`). Value Iteration applies the
   Bellman *optimality* equation (`V(s) ← max_a Σ P(s'|s,a)[R + γV(s')]`); Policy Iteration
   alternates the Bellman *expectation* equation (evaluate the current policy) with greedy
-  improvement.
-- **Sidebar**: γ (0.5-1.0), θ, max iterations, DP method, slip probability, goal/trap reward (no
-  step reward, no grid-regeneration controls — the board is static by design).
+  improvement. `transition_model()` only offers actions that actually move the agent — an action
+  that would bump a wall or the board edge is left out of the model entirely, so `max_a` can
+  never select one; the learned policy can't deliberately walk into a wall.
+- **Sidebar**: γ (0.5-1.0), θ, max iterations, DP method, slip probability, trap reward (no step
+  reward, no goal reward, no grid-regeneration controls — the board and the goal payout are both
+  fixed by design).
 - **Train tab**: Δ V per iteration (log-scale), iterations-to-converge, V-heatmap snapshot per
   iteration (cheap to store all of them — DP converges in well under 100 sweeps).
 - **Board tab**: grid heatmap (V) + policy arrows; slider over *iteration number* (not episodes)

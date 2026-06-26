@@ -26,15 +26,18 @@ ROOM1_SLIPPERY = frozenset({
     (5, 8), (6, 4), (7, 6), (8, 1), (8, 7),
 })
 
+# Fixed and not user-adjustable: kept high on purpose so V(s) stays visible across
+# the board after discounting (see SPRINTS.md Sprint 2, "Reward model").
+ROOM1_GOAL_REWARD = 100.0
 
-def make_room1_grid(slip_prob: float = 0.2, goal_reward: float = 20.0,
-                     trap_reward: float = -20.0) -> GridWorld:
+
+def make_room1_grid(slip_prob: float = 0.2, trap_reward: float = -20.0) -> GridWorld:
     """No step_reward parameter on purpose — Room 1's Bellman equation has no separate
-    step cost; V(s) is shaped entirely by discounting the terminal rewards (see
-    SPRINTS.md Sprint 2, 'Reward model')."""
+    step cost; V(s) is shaped entirely by discounting the terminal reward. No
+    goal_reward parameter either: it's fixed at ROOM1_GOAL_REWARD, not tunable."""
     return GridWorld(
         size=ROOM1_SIZE, start=ROOM1_START, goal=ROOM1_GOAL,
         walls=ROOM1_WALLS, traps=ROOM1_TRAPS, slippery=ROOM1_SLIPPERY,
         slip_prob=slip_prob, step_reward=0.0,
-        goal_reward=goal_reward, trap_reward=trap_reward,
+        goal_reward=ROOM1_GOAL_REWARD, trap_reward=trap_reward,
     )

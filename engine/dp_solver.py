@@ -8,8 +8,6 @@ update can see other states already updated earlier in the same sweep).
 """
 from __future__ import annotations
 
-from engine.grid_world import ACTIONS
-
 
 def _actions_by_state(model: dict) -> dict:
     actions_by_state: dict = {}
@@ -104,10 +102,13 @@ def expected_steps_to_absorption(model: dict, states: list, policy_dist, theta: 
                                   max_iterations: int = 2000) -> dict:
     """T(s) = 1 + sum_a pi(s,a) sum_s' P(s'|s,a)*T(s'), undiscounted on purpose — a
     literal expected step count, not a discounted return. "To absorption" rather
-    than "to goal": with real traps on the board, a policy's episode can end at a
-    trap instead of the goal, and this measures expected time to either.
+    than "to goal" since the function works generically for any number of terminal
+    states, even though Room 1's only one is the goal (traps are a costly detour,
+    not an ending).
 
-    policy_dist(s) -> {action: probability}, for every non-terminal state s.
+    policy_dist(s, actions) -> {action: probability}, for every non-terminal state s,
+    where `actions` is the list of actions actually offered at s (states can have
+    fewer than 4 once wall-bumping actions are excluded — see transition_model()).
     """
     actions_by_state = _actions_by_state(model)
     T = {s: 0.0 for s in states}
@@ -115,7 +116,7 @@ def expected_steps_to_absorption(model: dict, states: list, policy_dist, theta: 
     for _ in range(max_iterations):
         delta = 0.0
         for s, actions in actions_by_state.items():
-            dist = policy_dist(s)
+            dist = policy_dist(s, actions)
             old_t = T[s]
             v = 1.0
             for a in actions:
@@ -130,13 +131,14 @@ def expected_steps_to_absorption(model: dict, states: list, policy_dist, theta: 
     return T
 
 
-def uniform_policy_dist(_state) -> dict:
-    """The random-walker baseline used for Escape Score's par_steps (see plan.md §2.2)."""
-    return {a: 1.0 / len(ACTIONS) for a in ACTIONS}
+def uniform_policy_dist(_state, actions: list) -> dict:
+    """The random-walker baseline used for Escape Score's par_steps (see plan.md §2.2).
+    Spreads probability only over the actions actually available at this state."""
+    return {a: 1.0 / len(actions) for a in actions}
 
 
 def greedy_policy_dist(policy: dict):
     """One-hot distribution over a learned deterministic policy dict."""
-    def dist(state):
+    def dist(state, _actions):
         return {policy[state]: 1.0}
     return dist

@@ -1,4 +1,4 @@
-from engine.grid_world import DOWN, RIGHT, UP, GridWorld, random_layout
+from engine.grid_world import DOWN, LEFT, RIGHT, UP, GridWorld, random_layout
 
 
 def test_reset_returns_start():
@@ -29,13 +29,16 @@ def test_reaching_goal_terminates_with_goal_reward():
     assert reward == 1.0
 
 
-def test_trap_terminates_with_trap_reward():
+def test_trap_gives_negative_reward_but_does_not_terminate():
     g = GridWorld(size=2, start=(0, 0), goal=(1, 1), traps=frozenset({(0, 1)}), trap_reward=-1.0)
     g.reset()
     state, reward, done, _ = g.step(RIGHT)
     assert state == (0, 1)
-    assert done is True
+    assert done is False
     assert reward == -1.0
+    # the episode keeps going -- stepping again from the trap cell works normally
+    state, _reward, _done, _ = g.step(DOWN)
+    assert state == (1, 1)
 
 
 def test_slip_probability_one_never_takes_intended_action():
@@ -62,6 +65,28 @@ def test_transition_model_excludes_terminal_states():
     g = GridWorld(size=3, start=(0, 0), goal=(2, 2))
     model = g.transition_model()
     assert all(s != g.goal for (s, _a) in model)
+
+
+def test_transition_model_excludes_actions_that_bump_a_wall_or_boundary():
+    g = GridWorld(size=3, start=(0, 0), goal=(2, 2), walls=frozenset({(0, 1)}))
+    model = g.transition_model()
+    # from (0,0): RIGHT bumps the wall, UP and LEFT bump the boundary -- none legal
+    assert ((0, 0), RIGHT) not in model
+    assert ((0, 0), UP) not in model
+    assert ((0, 0), LEFT) not in model
+    # DOWN actually moves the agent, so it stays available
+    assert ((0, 0), DOWN) in model
+
+
+def test_every_non_terminal_state_has_at_least_one_legal_action():
+    g = GridWorld(size=4, walls=frozenset({(0, 1), (1, 1)}))
+    model = g.transition_model()
+    actions_by_state: dict = {}
+    for (s, a) in model:
+        actions_by_state.setdefault(s, []).append(a)
+    for s in g.all_states():
+        if not g.is_terminal(s):
+            assert actions_by_state.get(s), f"{s} has no legal action"
 
 
 def test_random_layout_avoids_start_and_goal():

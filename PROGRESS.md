@@ -34,4 +34,25 @@
   Streamlit install on `PATH` (a different Python on this machine) hit that gap and crashed on
   Room 1's first button. Reverted to `use_container_width=True`, which works on both; verified
   against both Python installs. README now calls out always using `.venv\Scripts\streamlit`.
+- **Redesign (post-review feedback)**:
+  - Traps are now **non-terminal** — stepping on one costs `trap_reward` but the episode
+    continues. `GridWorld.is_terminal()` only checks the goal now; `_reward_for` returns
+    `done=False` for traps. Knock-on effect: `transition_model()` now includes entries for trap
+    cells too (they're walkable), and `ui/grid_render.py` now draws policy arrows on them.
+  - `transition_model()` now **excludes any action that bumps a wall or the board edge**
+    (`_move(s,a) == s`) from the model entirely, so `value_iteration`/`policy_iteration`'s
+    `max_a` can never select one — the learned policy can't deliberately walk into a wall.
+    Slip can still accidentally land on a bump as a side effect of a legal action; only the
+    *chosen* action is restricted. Required reworking `expected_steps_to_absorption`'s
+    `policy_dist` callback to `(state, actions) -> dist` so the random baseline correctly
+    normalizes over however many actions are actually legal at a given state, not always 4.
+  - `goal_reward` is now a **fixed constant** (`ROOM1_GOAL_REWARD = 100.0` in
+    `engine/boards.py`), removed from `make_room1_grid()`'s signature entirely and from the
+    sidebar (shown read-only instead).
+  - Net effect on the default config: par_steps (random baseline) jumped from ~151 to ~524
+    steps — since a random walk can no longer be cut short by a trap, its only way to finish is
+    to stumble onto the goal, which takes much longer undirected. Optimal steps is unchanged
+    (~18); Escape Score for a good run is now closer to 950-960.
+  - Added 5 tests covering the new behavior (non-terminal trap, wall-bump exclusion, every open
+    cell has a legal action); full suite is 22/22 passing.
 - Next: **Sprint 3** — Room 2 (Monte Carlo).

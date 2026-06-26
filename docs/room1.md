@@ -11,11 +11,16 @@ is the baseline "what's possible when you already know everything" case.
 A fixed, hand-designed layout (not regenerated between runs):
 
 - **Walls** (gray): 13 cells scattered across 5 small clusters. Moving into one, or off the
-  edge of the board, is illegal — you just don't move.
+  edge of the board, is illegal — you just don't move. The optimal policy is never even
+  *offered* these moves as an option (see "No walking into walls" below), so it can't end up
+  recommending one by accident.
 - **Slippery cells** (blue): with probability `slip_prob`, the action that's actually taken
-  is a random one of the other three instead of the one you chose.
-- **Traps** (red): stepping here ends the episode with `trap_reward` (a large penalty).
-- **Goal** (green): stepping here ends the episode with `goal_reward` (a large bonus).
+  is a random one of the other three instead of the one you chose — including, unluckily,
+  one that bumps into a wall. That's a property of the ice, not a choice the policy makes.
+- **Traps** (red): stepping here costs `trap_reward` (a large penalty) but does **not** end
+  the episode — it's an expensive cell to pass through, not an instant failure. Step on one
+  twice and you pay twice.
+- **Goal** (green): stepping here ends the episode and pays out the goal reward.
 
 ### The Bellman equation
 
@@ -43,36 +48,49 @@ far fewer *outer* steps than Value Iteration needs sweeps — but each outer ste
 inner evaluation, so the iteration-replay slider on the Board tab will have noticeably fewer
 points for Policy Iteration than for Value Iteration. That's expected, not a bug.
 
-### Reward model — no step reward
+### Reward model — no step reward, and the goal reward is fixed
 
-`R(s,a,s')` is exactly **0** for every move that doesn't end the episode. The only nonzero
-rewards are `goal_reward` and `trap_reward`, paid once, on the step that ends things. There's
-no extra per-step penalty bolted on to make the agent hurry — it doesn't need one. Because
+`R(s,a,s')` is exactly **0** for every move that doesn't end the episode or land on a trap.
+There's no per-step penalty bolted on to make the agent hurry — it doesn't need one. Because
 future reward is discounted by `gamma` for every step it's delayed, a higher `gamma` means
 the goal's pull reaches farther across the board, and a lower `gamma` makes that pull fade to
 almost nothing a few steps away. Watch the V-heatmap change shape as you move the `gamma`
 slider — that's the entire mechanism, with nothing else mixed in.
+
+The goal reward itself is **fixed at a high value and not adjustable** — that's deliberate.
+Since it's the only thing (along with `gamma`) shaping V(s) across the whole board, keeping it
+high keeps the heatmap's value spread visible instead of collapsing toward zero everywhere.
+
+### No walking into walls
+
+The set of actions Value/Policy Iteration even consider at each cell excludes any action that
+would just bump into a wall or off the edge of the board — those moves are never offered, so
+`max_a` can never select one. The learned policy will never *deliberately* point into a wall.
+(Slip can still accidentally land you on a bump as a random side effect of a legal move near a
+slippery cell — that's the ice being unpredictable, not the policy making a bad choice.)
 
 ### Parameters
 
 | Parameter | What it controls |
 |---|---|
 | Slip probability | Chance a slippery cell substitutes a random action for the one chosen |
-| Goal reward | Payout for reaching the goal — kept high so it stays visible after discounting |
-| Trap reward | Penalty for stepping on a trap |
+| Trap reward | Penalty for stepping on a trap (doesn't end the episode) |
 | Method | Value Iteration or Policy Iteration |
 | Gamma (γ) | Discount factor — how much a delayed reward is worth today |
 | Theta (θ) | Convergence threshold — stop when the biggest change in V drops below this |
 | Max iterations | Safety cap; real convergence happens well before this on a 10x10 grid |
 | Max attempt steps | Safety cap on a single escape-attempt rollout |
 
+Goal reward is intentionally **not** in this list — it's fixed (shown read-only in the sidebar).
+
 ### Scoring
 
 The **Escape Score** shown after an escape attempt compares the steps actually taken against
-`par_steps` — the expected number of steps a *uniformly random* policy would take to reach
-*some* terminal cell (goal or trap) on this exact board. Comparing against a random walker
-rather than against the optimal policy's own time is what makes a well-trained run's score
-look good (close to 1000) instead of comparing the agent to itself. A trap or a timeout scores
-0 regardless of how many steps were taken — only reaching the goal counts as success. The Train
-tab also shows the *optimal* policy's own expected steps next to the random baseline, so you
-can see directly how much better-than-random the solved policy is.
+`par_steps` — the expected number of steps a *uniformly random* policy would take to reach the
+goal on this exact board. Since traps don't end the episode, the only thing a random walk can
+end on is the goal itself — which, undirected, typically takes hundreds of steps on this board,
+making a trained policy's score climb close to 1000. Only timing out without reaching the goal
+scores 0; wandering through a trap along the way still counts as success if the goal is reached
+within the step limit, just with a reward penalty already paid. The Train tab also shows the
+*optimal* policy's own expected steps next to the random baseline, so you can see directly how
+much better-than-random the solved policy is.

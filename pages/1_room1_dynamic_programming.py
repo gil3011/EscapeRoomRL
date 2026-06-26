@@ -3,7 +3,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from engine.boards import make_room1_grid
+from engine.boards import ROOM1_GOAL_REWARD, make_room1_grid
 from engine.dp_solver import (
     expected_steps_to_absorption, greedy_policy_dist, policy_iteration, uniform_policy_dist,
     value_iteration,
@@ -39,9 +39,10 @@ with st.sidebar:
 
     with st.expander("Environment", expanded=True):
         slip_prob = st.slider("Slip probability", 0.0, 0.9, 0.2, 0.05)
-        goal_reward = st.slider("Goal reward", 1.0, 100.0, 20.0, 1.0,
-                                 help="Kept high so V(s) stays visible after discounting.")
-        trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0)
+        st.caption(f"Goal reward: **{ROOM1_GOAL_REWARD:.0f}** (fixed — kept high so V(s) "
+                   "stays visible after discounting; not adjustable).")
+        trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0,
+                                 help="Stepping on a trap costs this much, but doesn't end the episode.")
 
     with st.expander("DP algorithm", expanded=True):
         method = st.radio("Method", ["Value Iteration", "Policy Iteration"])
@@ -62,7 +63,7 @@ if reset_clicked:
     st.rerun()
 
 if solve_clicked:
-    grid = make_room1_grid(slip_prob=slip_prob, goal_reward=goal_reward, trap_reward=trap_reward)
+    grid = make_room1_grid(slip_prob=slip_prob, trap_reward=trap_reward)
     model = grid.transition_model()
     states = grid.all_states()
 
@@ -131,7 +132,7 @@ with tab_board:
     if history is None:
         st.info("Solve the room first to see the board.")
     else:
-        grid = make_room1_grid(slip_prob=slip_prob, goal_reward=goal_reward, trap_reward=trap_reward)
+        grid = make_room1_grid(slip_prob=slip_prob, trap_reward=trap_reward)
         final_policy = history[-1]["policy"]
 
         view = st.radio("View", ["📊 Iteration snapshot", "🏁 Escape attempt"], horizontal=True)

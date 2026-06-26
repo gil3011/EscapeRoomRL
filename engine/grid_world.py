@@ -43,7 +43,7 @@ class GridWorld:
         return self.state
 
     def is_terminal(self, state: tuple[int, int]) -> bool:
-        return state == self.goal or state in self.traps
+        return state == self.goal
 
     def all_states(self) -> list[tuple[int, int]]:
         return [
@@ -67,12 +67,21 @@ class GridWorld:
         return next_state, reward, done, {}
 
     def transition_model(self):
-        """P(s'|s,a) and R(s,a,s') for every non-terminal state. Room 1 (DP) only."""
+        """P(s'|s,a) and R(s,a,s') for every non-terminal state. Room 1 (DP) only.
+
+        Only offers actions that actually move the agent: an action that would bump
+        into a wall or off the edge of the board is left out entirely, so a policy
+        derived from this model (argmax over the offered actions) can never choose
+        to walk into a wall. Slip can still accidentally land on a bump as a random
+        side effect of a legal action — that's a property of the ice, not a choice.
+        """
         model = {}
         for s in self.all_states():
             if self.is_terminal(s):
                 continue
             for a in ACTIONS:
+                if self._move(s, a) == s:
+                    continue
                 model[(s, a)] = self._outcomes(s, a)
         return model
 
@@ -103,7 +112,7 @@ class GridWorld:
         if state == self.goal:
             return self.goal_reward, True
         if state in self.traps:
-            return self.trap_reward, True
+            return self.trap_reward, False  # costly, but not terminal
         return self.step_reward, False
 
 

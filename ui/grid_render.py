@@ -34,9 +34,10 @@ def render_grid(grid, values: dict | None = None, policy: dict | None = None,
     fig.add_annotation(x=sj, y=si, text="●", showarrow=False, font=dict(size=12, color="#22c55e"))
 
     if policy:
-        skip = {grid.goal, *grid.traps}
+        # traps aren't terminal, so the policy still recommends a move from one —
+        # only the goal itself has no action to show.
         for (i, j), a in policy.items():
-            if (i, j) in skip:
+            if (i, j) == grid.goal:
                 continue
             fig.add_annotation(x=j, y=i, text=ACTION_ARROWS[a], showarrow=False, font=dict(size=16))
 

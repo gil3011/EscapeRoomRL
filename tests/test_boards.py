@@ -2,6 +2,7 @@ from collections import deque
 
 from engine.boards import (
     ROOM1_GOAL, ROOM1_SIZE, ROOM1_SLIPPERY, ROOM1_START, ROOM1_TRAPS, ROOM1_WALLS,
+    make_room1_grid,
 )
 from engine.grid_world import ACTION_DELTAS
 
@@ -46,3 +47,17 @@ def test_no_isolated_pockets():
     } - ROOM1_WALLS
     reachable = _reachable_from(ROOM1_START, ROOM1_WALLS, ROOM1_SIZE)
     assert reachable == all_open_cells
+
+
+def test_every_open_cell_has_a_legal_action():
+    # the wall clusters are scattered fairly densely -- make sure none of them
+    # accidentally box in a cell on all 4 sides, which would leave it with no
+    # legal action once wall-bumping moves are excluded from the model.
+    grid = make_room1_grid()
+    model = grid.transition_model()
+    actions_by_state: dict = {}
+    for (s, a) in model:
+        actions_by_state.setdefault(s, []).append(a)
+    for s in grid.all_states():
+        if not grid.is_terminal(s):
+            assert actions_by_state.get(s), f"{s} has no legal action"

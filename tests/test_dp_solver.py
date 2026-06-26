@@ -1,7 +1,7 @@
 from engine.dp_solver import (
     expected_steps_to_absorption, policy_iteration, uniform_policy_dist, value_iteration,
 )
-from engine.grid_world import RIGHT, GridWorld
+from engine.grid_world import DOWN, RIGHT, GridWorld
 
 
 def test_value_iteration_matches_hand_computation():
@@ -55,22 +55,25 @@ def test_expected_steps_one_step_to_goal():
     model = grid.transition_model()
     states = grid.all_states()
 
-    always_right = lambda _s: {RIGHT: 1.0}
+    always_right = lambda _s, _actions: {RIGHT: 1.0}
     T = expected_steps_to_absorption(model, states, always_right, theta=1e-8)
     assert abs(T[(0, 0)] - 1.0) < 1e-4
 
 
-def test_expected_steps_one_step_to_trap():
-    # trap where the goal would normally be; a policy that walks straight into it
-    # should show a small expected-steps-to-absorption, same as reaching a goal fast.
-    grid = GridWorld(size=2, start=(0, 0), goal=(1, 1), traps=frozenset({(0, 1)}),
-                      step_reward=0.0, slip_prob=0.0)
-    model = grid.transition_model()
-    states = grid.all_states()
+def test_expected_steps_unaffected_by_a_non_terminal_trap():
+    # a policy that walks RIGHT then DOWN passes directly through (0,1) on the way
+    # to the goal at (1,1). Marking (0,1) a trap shouldn't change the step count --
+    # traps no longer end the episode, only the reward is affected.
+    plain = GridWorld(size=2, start=(0, 0), goal=(1, 1), step_reward=0.0, slip_prob=0.0)
+    trapped = GridWorld(size=2, start=(0, 0), goal=(1, 1), traps=frozenset({(0, 1)}),
+                         step_reward=0.0, slip_prob=0.0)
 
-    always_right = lambda _s: {RIGHT: 1.0}
-    T = expected_steps_to_absorption(model, states, always_right, theta=1e-8)
-    assert abs(T[(0, 0)] - 1.0) < 1e-4
+    right_then_down = lambda s, _actions: {RIGHT: 1.0} if s == (0, 0) else {DOWN: 1.0}
+    for g in (plain, trapped):
+        model = g.transition_model()
+        states = g.all_states()
+        T = expected_steps_to_absorption(model, states, right_then_down, theta=1e-8)
+        assert abs(T[(0, 0)] - 2.0) < 1e-4
 
 
 def test_expected_steps_random_policy_is_larger_than_direct_policy():
@@ -78,7 +81,7 @@ def test_expected_steps_random_policy_is_larger_than_direct_policy():
     model = grid.transition_model()
     states = grid.all_states()
 
-    always_right = lambda _s: {RIGHT: 1.0}
+    always_right = lambda _s, _actions: {RIGHT: 1.0}
     direct = expected_steps_to_absorption(model, states, always_right, theta=1e-6)
     random_walk = expected_steps_to_absorption(model, states, uniform_policy_dist, theta=1e-6)
 
