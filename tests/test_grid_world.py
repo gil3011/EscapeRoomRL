@@ -52,6 +52,42 @@ def test_slip_probability_one_never_takes_intended_action():
     assert (2, 3) not in outcomes
 
 
+def test_slip_never_bumps_a_wall_when_a_legal_alternative_exists():
+    # from (1,0): UP->(0,0), DOWN->(2,0), LEFT bumps the boundary, RIGHT bumps the
+    # wall at (1,1). With slip_prob=1.0 and intended=UP, the only legal alternative
+    # is DOWN -- slip must never "choose" the wall and leave the agent stuck at (1,0).
+    g = GridWorld(size=3, start=(1, 0), goal=(2, 2), walls=frozenset({(1, 1)}),
+                  slippery=frozenset({(1, 0)}), slip_prob=1.0, seed=0)
+    outcomes = set()
+    for _ in range(30):
+        g.reset()
+        state, _, _, _ = g.step(UP)
+        outcomes.add(state)
+    assert outcomes == {(2, 0)}
+
+
+def test_slip_with_no_legal_alternative_keeps_the_intended_action():
+    # a 1x2 corridor: from (0,0) the only legal action at all is RIGHT. Slipping has
+    # nowhere else to go, so the intended action must still proceed.
+    g = GridWorld(size=2, start=(0, 0), goal=(1, 1), walls=frozenset({(1, 0)}),
+                  slippery=frozenset({(0, 0)}), slip_prob=1.0, seed=0)
+    g.reset()
+    state, _, _, _ = g.step(RIGHT)
+    assert state == (0, 1)
+
+
+def test_transition_model_slip_outcomes_exclude_wall_bumps():
+    g = GridWorld(size=3, start=(1, 0), goal=(2, 2), walls=frozenset({(1, 1)}),
+                  slippery=frozenset({(1, 0)}), slip_prob=0.3)
+    model = g.transition_model()
+    outcomes = model[((1, 0), UP)]
+    next_states = {s2 for _p, s2, _r, _d in outcomes}
+    # only the intended UP->(0,0) and the one legal alternative DOWN->(2,0) -- never
+    # a probability mass parked on (1,0) itself from a wall-bumping "alternative"
+    assert next_states == {(0, 0), (2, 0)}
+    assert abs(sum(p for p, *_ in outcomes) - 1.0) < 1e-9
+
+
 def test_transition_model_probabilities_sum_to_one():
     g = GridWorld(size=4, start=(0, 0), goal=(3, 3), slippery=frozenset({(1, 1)}), slip_prob=0.2)
     model = g.transition_model()

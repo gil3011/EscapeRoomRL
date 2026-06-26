@@ -59,7 +59,11 @@ class GridWorld:
 
         actual_action = action
         if self.state in self.slippery and self._rng.random() < self.slip_prob:
-            actual_action = self._rng.choice([a for a in ACTIONS if a != action])
+            alternatives = [a for a in self._legal_actions(self.state) if a != action]
+            if alternatives:
+                actual_action = self._rng.choice(alternatives)
+            # no legal alternative to slip into (e.g. walled in on every other side):
+            # the intended action just proceeds, slip_prob has nowhere to go this time.
 
         next_state = self._move(self.state, actual_action)
         reward, done = self._reward_for(next_state)
@@ -72,18 +76,21 @@ class GridWorld:
         Only offers actions that actually move the agent: an action that would bump
         into a wall or off the edge of the board is left out entirely, so a policy
         derived from this model (argmax over the offered actions) can never choose
-        to walk into a wall. Slip can still accidentally land on a bump as a random
-        side effect of a legal action — that's a property of the ice, not a choice.
+        to walk into a wall. Slip is restricted the same way — it only ever
+        substitutes another *legal* direction, never one that would bump a wall.
         """
         model = {}
         for s in self.all_states():
             if self.is_terminal(s):
                 continue
-            for a in ACTIONS:
-                if self._move(s, a) == s:
-                    continue
+            for a in self._legal_actions(s):
                 model[(s, a)] = self._outcomes(s, a)
         return model
+
+    def _legal_actions(self, state: tuple[int, int]) -> list[int]:
+        """Actions that actually move the agent from this state — excludes any
+        action that would just bump into a wall or off the edge of the board."""
+        return [a for a in ACTIONS if self._move(state, a) != state]
 
     def _outcomes(self, s: tuple[int, int], a: int):
         """List of (probability, next_state, reward, done) for taking action a in state s."""
@@ -92,10 +99,15 @@ class GridWorld:
             r, done = self._reward_for(s2)
             return [(1.0, s2, r, done)]
 
+        alternatives = [x for x in self._legal_actions(s) if x != a]
+        if not alternatives:
+            s2 = self._move(s, a)
+            r, done = self._reward_for(s2)
+            return [(1.0, s2, r, done)]
+
         outcomes = []
-        other_actions = [x for x in ACTIONS if x != a]
-        for actual in ACTIONS:
-            prob = (1 - self.slip_prob) if actual == a else self.slip_prob / len(other_actions)
+        for actual in [a] + alternatives:
+            prob = (1 - self.slip_prob) if actual == a else self.slip_prob / len(alternatives)
             s2 = self._move(s, actual)
             r, done = self._reward_for(s2)
             outcomes.append((prob, s2, r, done))

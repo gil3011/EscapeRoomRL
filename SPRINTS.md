@@ -91,17 +91,22 @@ artificial per-step cost needed to make the agent want to hurry. A lower γ make
 heatmap. `step_reward` is dropped from Room 1's sidebar entirely (fixed internally at `0.0`) —
 `GridWorld`'s own default stays available for any later room that wants a step cost.
 
-### No walking into walls
+### No walking into walls — and no slipping into one either
 `transition_model()` only offers an action `a` from state `s` when it actually moves the agent
 (`_move(s, a) != s`) — an action that would bump a wall or the board edge is left out of the
 model entirely. Since `value_iteration`/`policy_iteration` take `max_a` only over the actions
 the model offers, the learned policy can never *deliberately* recommend walking into a wall.
-Slip is unaffected: it can still accidentally land the agent on a bump as a random side effect
-of a legal action near a slippery cell — that's the ice being unpredictable, not the policy
-making a bad choice. (Knock-on effect: `expected_steps_to_absorption`'s `policy_dist` callback
-signature became `(state, actions) -> dist` instead of `(state) -> dist`, since the random
-baseline now has to normalize over however many actions are actually legal at that state — not
-always 4.)
+
+Slip is restricted the same way, per your follow-up: a new `GridWorld._legal_actions(state)`
+helper (the same `_move(s,a) != s` filter, factored out so `step()`, `transition_model()`, and
+`_outcomes()` all share one definition of "legal") means the random direction slip substitutes
+is drawn only from the *other legal* actions at that state — never one that bumps a wall. Two of
+Room 1's ten slippery cells happen to sit directly next to a wall (`(1,1)` and `(5,8)`), so this
+is a real, measurable fix on this board, not just a hypothetical: V(start) shifted slightly
+(≈16.04 → ≈15.92 at default settings) once that wasted-bump probability mass got redistributed
+to the remaining legal directions instead. In the (currently nonexistent, but handled) edge case
+where a slippery cell's *only* legal action is the intended one, slip has nowhere else to go and
+the intended action just proceeds that turn.
 
 ### Algorithms (`engine/dp_solver.py`) — the Bellman equation, directly off the examples
 Adapted directly from `code examples/value_iteration.py` and

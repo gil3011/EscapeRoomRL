@@ -210,7 +210,8 @@ G next to V for comparison).
   alternates the Bellman *expectation* equation (evaluate the current policy) with greedy
   improvement. `transition_model()` only offers actions that actually move the agent — an action
   that would bump a wall or the board edge is left out of the model entirely, so `max_a` can
-  never select one; the learned policy can't deliberately walk into a wall.
+  never select one; the learned policy can't deliberately walk into a wall. Slip is restricted
+  the same way: it only ever substitutes another *legal* direction, never a wall bump.
 - **Sidebar**: γ (0.5-1.0), θ, max iterations, DP method, slip probability, trap reward (no step
   reward, no goal reward, no grid-regeneration controls — the board and the goal payout are both
   fixed by design).

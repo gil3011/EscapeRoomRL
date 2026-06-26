@@ -85,4 +85,17 @@
   - Verified via `pytest` (25/25, unaffected) and `AppTest` (lobby + full Room 1 flow, zero
     exceptions); visual color check left to you on the already-running app, since you already
     had it open.
+- **Slip never bumps a wall (post-review feedback)**: factored out a new
+  `GridWorld._legal_actions(state)` helper (shared by `step()`, `transition_model()`, and
+  `_outcomes()`) so slipping on an icy cell only ever substitutes another *legal* direction —
+  never one that would just bump a wall or the board edge. Previously the substituted direction
+  was drawn from all 3 non-intended compass directions regardless of legality, occasionally
+  "wasting" a slip on a wall it was standing right next to. Two of Room 1's ten slippery cells
+  (`(1,1)`, `(5,8)`) are directly wall-adjacent, so this is a real, measurable effect on this
+  board: V(start) shifted slightly (≈16.04 → ≈15.92 at default settings) once that probability
+  mass got redistributed to the remaining legal directions. If a cell's only legal action is the
+  intended one, slip simply has nowhere else to go that turn. Added 3 tests
+  (`test_slip_never_bumps_a_wall_when_a_legal_alternative_exists`,
+  `test_slip_with_no_legal_alternative_keeps_the_intended_action`,
+  `test_transition_model_slip_outcomes_exclude_wall_bumps`); full suite is 28/28 passing.
 - Next: **Sprint 3** — Room 2 (Monte Carlo).

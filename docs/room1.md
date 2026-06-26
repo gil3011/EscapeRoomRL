@@ -15,8 +15,9 @@ A fixed, hand-designed layout (not regenerated between runs):
   *offered* these moves as an option (see "No walking into walls" below), so it can't end up
   recommending one by accident.
 - **Slippery cells** (blue): with probability `slip_prob`, the action that's actually taken
-  is a random one of the other three instead of the one you chose — including, unluckily,
-  one that bumps into a wall. That's a property of the ice, not a choice the policy makes.
+  is a random *legal* one instead of the one you chose — slipping never bumps a wall or the
+  board edge either, it only ever substitutes a different direction that actually goes
+  somewhere. That's a property of the ice, not a choice the policy makes.
 - **Traps** (red): stepping here costs `trap_reward` (a large penalty) but does **not** end
   the episode — it's an expensive cell to pass through, not an instant failure. Step on one
   twice and you pay twice.
@@ -61,13 +62,17 @@ The goal reward itself is **fixed at a high value and not adjustable** — that'
 Since it's the only thing (along with `gamma`) shaping V(s) across the whole board, keeping it
 high keeps the heatmap's value spread visible instead of collapsing toward zero everywhere.
 
-### No walking into walls
+### No walking into walls — and no slipping into one either
 
 The set of actions Value/Policy Iteration even consider at each cell excludes any action that
 would just bump into a wall or off the edge of the board — those moves are never offered, so
 `max_a` can never select one. The learned policy will never *deliberately* point into a wall.
-(Slip can still accidentally land you on a bump as a random side effect of a legal move near a
-slippery cell — that's the ice being unpredictable, not the policy making a bad choice.)
+
+Slip is restricted the same way: when a slippery cell substitutes a random direction, it only
+ever picks among the directions that actually lead somewhere. It never wastes a turn by
+"slipping" into a wall right next to the ice. (In the rare cell that's only legally reachable in
+one direction at all, with no second direction to slip into, slipping simply has nowhere else to
+go that turn and the intended move proceeds as if `slip_prob` were 0 there.)
 
 ### Parameters
 
