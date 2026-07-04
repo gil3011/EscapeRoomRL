@@ -30,8 +30,6 @@ max_iterations = 150  # fixed — not user-adjustable
 env_col, dp_col, attempt_col = st.columns(3)
 with env_col:
     slip_prob = st.slider("Slip probability", 0.0, 0.9, 0.2, 0.05)
-    st.caption(f"Goal reward: **{ROOM1_GOAL_REWARD:.0f}** (fixed — kept high so V(s) "
-               "stays visible after discounting; not adjustable).")
     trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0,
                              help="Stepping on a trap costs this much, but doesn't end the episode.")
 
