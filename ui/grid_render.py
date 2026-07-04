@@ -18,6 +18,8 @@ from engine.grid_world import ACTION_ARROWS
 
 def render_grid(grid, values: dict | None = None, policy: dict | None = None,
                  agent_pos: tuple[int, int] | None = None, path: list[tuple[int, int]] | None = None,
+                 enemy_pos: tuple[int, int] | None = None,
+                 patrol_path: list[tuple[int, int]] | None = None,
                  title: str = "") -> go.Figure:
     size = grid.size
     z = [[0.0] * size for _ in range(size)]
@@ -51,19 +53,37 @@ def render_grid(grid, values: dict | None = None, policy: dict | None = None,
     si, sj = grid.start
     fig.add_annotation(x=sj, y=si, text="●", showarrow=False, font=dict(size=14, color="#7c3aed"))
 
-    # shortcut tiles (Room 3): stepping onto a source teleports to its destination.
-    # Drawn in teal — a hue no other marker uses — with a dashed line linking the two
-    # so the mechanic reads at a glance. The agent never rests on a source cell.
+    # shortcut / trap-door tiles: stepping onto a source teleports to its destination,
+    # with a dashed line linking the two. A helpful shortcut (Room 3) is teal; a trap
+    # door (Room 4, source listed in grid.trap_door_sources) is red — same mechanic, but
+    # the colour warns it sends the agent backward. The agent never rests on a source.
     shortcuts = getattr(grid, "shortcuts", None) or {}
+    trap_doors = getattr(grid, "trap_door_sources", None) or frozenset()
     for (si_, sj_), (di_, dj_) in shortcuts.items():
+        bad = (si_, sj_) in trap_doors
+        line_c = "rgba(220,38,38,0.75)" if bad else "rgba(13,148,136,0.7)"
+        src_c = "rgba(220,38,38,0.32)" if bad else "rgba(13,148,136,0.30)"
+        dst_c = "rgba(220,38,38,0.16)" if bad else "rgba(13,148,136,0.15)"
+        src_icon, dst_icon, dst_color = ("🕳️", "↩", "#dc2626") if bad else ("🌀", "◎", "#0d9488")
         fig.add_trace(go.Scatter(x=[sj_, dj_], y=[si_, di_], mode="lines",
-                                 line=dict(color="rgba(13,148,136,0.7)", width=2, dash="dot"),
+                                 line=dict(color=line_c, width=2, dash="dot"),
                                  showlegend=False, hoverinfo="skip"))
-        cell_rect(si_, sj_, "rgba(13,148,136,0.30)")
-        cell_rect(di_, dj_, "rgba(13,148,136,0.15)")
-        fig.add_annotation(x=sj_, y=si_, text="🌀", showarrow=False, font=dict(size=18))
-        fig.add_annotation(x=dj_, y=di_, text="◎", showarrow=False,
-                           font=dict(size=18, color="#0d9488"))
+        cell_rect(si_, sj_, src_c)
+        cell_rect(di_, dj_, dst_c)
+        fig.add_annotation(x=sj_, y=si_, text=src_icon, showarrow=False, font=dict(size=18))
+        fig.add_annotation(x=dj_, y=di_, text=dst_icon, showarrow=False,
+                           font=dict(size=18, color=dst_color))
+
+    # patrol enemy (Room 4): the fixed path drawn faint, the current position marked.
+    if patrol_path:
+        fig.add_trace(go.Scatter(x=[c[1] for c in patrol_path], y=[c[0] for c in patrol_path],
+                                 mode="lines",
+                                 line=dict(color="rgba(220,38,38,0.30)", width=6),
+                                 showlegend=False, hoverinfo="skip"))
+    if enemy_pos is not None:
+        ei, ej = enemy_pos
+        cell_rect(ei, ej, "rgba(220,38,38,0.45)")
+        fig.add_annotation(x=ej, y=ei, text="👾", showarrow=False, font=dict(size=22))
 
     if policy:
         # traps aren't terminal, so the policy still recommends a move from one —

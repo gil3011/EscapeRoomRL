@@ -486,24 +486,25 @@ converge on the larger state space), max steps/episode, snapshot interval, max a
   step slider advances phase in lock-step). G reported next to V(start).
 
 ### Backlog
-- [ ] `engine/grid_world.py` — `initial_state()`, `trap_door_sources` field
-- [ ] `engine/patrol_world.py` — `PatrolGridWorld` (augmented state, moving enemy, collision)
-- [ ] `tests/test_patrol_world.py` — enemy advances deterministically; collision (incl. swap) is
+- [x] `engine/grid_world.py` — `initial_state()`, `is_goal()`, `trap_door_sources` field;
+  factored slip+move into `_sample_next_cell()` so PatrolGridWorld can reuse it
+- [x] `engine/patrol_world.py` — `PatrolGridWorld` (augmented state, moving enemy, collision)
+- [x] `tests/test_patrol_world.py` — enemy advances deterministically; collision (incl. swap) is
   terminal with `enemy_reward`; reaching the goal is terminal; `all_states`/`legal_actions`/
-  `is_terminal` handle `(cell, phase)`; a slip/trap-door teleport still works under the subclass
-- [ ] `engine/boards.py` — `ROOM4_*` constants + `make_room4_grid(...)`
-- [ ] `tests/test_boards.py` — Room 4: no overlaps, goal reachable at some phase (BFS over
-  `(cell, phase)`), enemy never starts on start/goal, trap-door dst is a plain backward cell
-- [ ] `engine/q_learning_agent.py` — off-policy target, per-episode outcome, shared helpers
-- [ ] `tests/test_q_learning_agent.py` — solves a small deterministic grid; on Room 4 the greedy
-  policy escapes without being caught most of the time; matches SARSA on an enemy-free grid;
-  off-policy target differs from SARSA on a hand-built case
-- [ ] `pages/4_room4_q_learning.py` — sidebar, Info/Train/Board with phase slider + enemy replay,
-  `TrainingRunner` wiring
-- [ ] `ui/grid_render.py` — `enemy_pos` + patrol path; trap-door (red) vs shortcut (teal) styling
-- [ ] `docs/room4.md` — SARSA-vs-Q-learning side by side, the state-augmentation lesson, the
+  `is_terminal` handle `(cell, phase)`; slip and trap-door teleport still work under the subclass
+- [x] `engine/boards.py` — `ROOM4_*` constants + `make_room4_grid(slip, trap_reward, enemy_reward)`
+- [x] `tests/test_boards.py` — Room 4: no overlaps, goal reachable, enemy never on start/goal,
+  trap-door dst is a plain backward cell, solvable with correct timing (BFS over `(cell, phase)`)
+- [x] `engine/q_learning_agent.py` — off-policy `max` target, per-episode outcome, shared helpers
+  imported from `sarsa_agent`
+- [x] `tests/test_q_learning_agent.py` — solves a small deterministic grid; agrees with SARSA when
+  acting is risk-free; outcome plumbing + the enemy can catch; threads the patrol once trained
+- [x] `pages/4_room4_q_learning.py` — sidebar, Info/Train/Board with phase slider + enemy replay,
+  `TrainingRunner` wiring, outcome-breakdown chart
+- [x] `ui/grid_render.py` — `enemy_pos` + patrol path; trap-door (red 🕳️) vs shortcut (teal 🌀) styling
+- [x] `docs/room4.md` — SARSA-vs-Q-learning side by side, the state-augmentation lesson, the
   patrol/trap-door mechanics, parameter glossary
-- [ ] `runs/room4/` persistence (history incl. outcome rates, checkpoints)
+- [x] `runs/room4/` persistence (history incl. outcome list, checkpoints)
 
 **Definition of Done**: every tunable Room 4 parameter works from the sidebar; training shows the
 reward/TD/ε curves **and** the escaped/caught/timeout breakdown; the checkpoint slider (with phase
@@ -513,6 +514,12 @@ meaningfully more often than it's caught, and the Info tab clearly explains — 
 shows — the off-policy `max` update vs. Room 3's on-policy SARSA. Full test suite passes.
 **Out of scope**: bonus/pickup tiles and any remaining §6 stretch toggles; moving obstacles in the
 continuous rooms (Rooms 5-6).
+
+**Verified**: full suite 60/60 passing (added 8 patrol-world, 6 Room 4 board, and 5 Q-learning
+tests). AppTest smoke run trains → Train/Board tabs (phase slider + enemy-animated escape replay)
+→ persistence round-trip with zero exceptions. At the default config (5000 episodes, slip 0.25) the
+greedy policy escapes 100% of 300 stochastic rollouts, 0% caught, averaging 18 steps (the optimal
+timed solve), with a realistic ~2-3% caught rate late in training as residual ε bumps the patrol.
 
 ---
 
