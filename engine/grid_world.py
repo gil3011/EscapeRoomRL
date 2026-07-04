@@ -28,6 +28,10 @@ class GridWorld:
     walls: frozenset = field(default_factory=frozenset)
     slippery: frozenset = field(default_factory=frozenset)
     traps: frozenset = field(default_factory=frozenset)
+    # shortcut tiles: stepping onto a source cell (by choice or via slip) instantly
+    # relocates the agent to its paired destination. Empty by default, so Room 1 and
+    # any room that doesn't want them is unaffected. Room 3 (SARSA) is the first user.
+    shortcuts: dict = field(default_factory=dict)
     slip_prob: float = 0.2
     step_reward: float = -0.04
     goal_reward: float = 1.0
@@ -87,6 +91,14 @@ class GridWorld:
                 model[(s, a)] = self._outcomes(s, a)
         return model
 
+    def legal_actions(self, state: tuple[int, int]) -> list[int]:
+        """Public: the actions that actually move the agent from this state (no
+        wall/edge bumps). Model-free rooms (SARSA, Q-learning) use this to restrict
+        their behaviour policy to position-changing moves — it exposes only which
+        moves are dead ends, not the transition probabilities or rewards, which they
+        still learn purely from experience."""
+        return self._legal_actions(state)
+
     def _legal_actions(self, state: tuple[int, int]) -> list[int]:
         """Actions that actually move the agent from this state — excludes any
         action that would just bump into a wall or off the edge of the board."""
@@ -118,7 +130,11 @@ class GridWorld:
         i, j = state[0] + di, state[1] + dj
         if i < 0 or i >= self.size or j < 0 or j >= self.size or (i, j) in self.walls:
             return state  # bumped into a wall/boundary: no movement
-        return (i, j)
+        # landing on a shortcut source teleports to its destination. Because every
+        # other method funnels through _move (step(), transition_model(), _outcomes(),
+        # and _legal_actions()'s "does it move?" filter), the teleport is applied
+        # everywhere for free -- including when a slip lands the agent on a shortcut.
+        return self.shortcuts.get((i, j), (i, j))
 
     def _reward_for(self, state: tuple[int, int]):
         if state == self.goal:

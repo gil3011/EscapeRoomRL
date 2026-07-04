@@ -41,3 +41,49 @@ def make_room1_grid(slip_prob: float = 0.2, trap_reward: float = -20.0) -> GridW
         slip_prob=slip_prob, step_reward=0.0,
         goal_reward=ROOM1_GOAL_REWARD, trap_reward=trap_reward,
     )
+
+
+# --- Room 3 (SARSA) -------------------------------------------------------------
+# Same fixed-board convention as Room 1, a different layout, plus one new mechanic:
+# a shortcut tile. The wall clusters bow the natural route around the middle of the
+# board; stepping onto the shortcut source (5,1) teleports the agent to (5,8), on the
+# far side near the goal — cutting the shortest solve from 18 steps to 11 (validated:
+# no overlaps, goal reachable, no isolated pockets, destination is a plain cell). Same
+# reward convention as Room 1: no step cost, fixed high goal reward, tunable trap cost.
+ROOM3_SIZE = 10
+ROOM3_START = (0, 0)
+ROOM3_GOAL = (9, 9)
+
+ROOM3_WALLS = frozenset({
+    (1, 3), (2, 3), (2, 4),
+    (4, 1), (4, 2),
+    (3, 6), (4, 6), (4, 7),
+    (6, 4), (7, 4), (7, 5),
+    (8, 8), (9, 7),
+})
+ROOM3_TRAPS = frozenset({(2, 6), (6, 7), (8, 2)})
+ROOM3_SLIPPERY = frozenset({
+    (1, 1), (1, 6), (3, 3), (3, 8), (5, 2),
+    (5, 5), (6, 1), (7, 8), (8, 5), (9, 3),
+})
+# one (source -> destination) teleport pair; source is a plain cell the agent never
+# rests on (it's relocated on arrival), destination is a plain open cell near the goal.
+ROOM3_SHORTCUT_SRC = (5, 1)
+ROOM3_SHORTCUT_DST = (5, 8)
+ROOM3_SHORTCUTS = {ROOM3_SHORTCUT_SRC: ROOM3_SHORTCUT_DST}
+
+# Fixed, matching Room 1, so V(start) stays on a comparable scale across the lobby.
+ROOM3_GOAL_REWARD = 100.0
+
+
+def make_room3_grid(slip_prob: float = 0.25, trap_reward: float = -20.0) -> GridWorld:
+    """Room 3's fixed board. Same reward convention as Room 1 (no step cost, fixed
+    goal reward), plus the shortcut-tile teleport. Default slip_prob is nudged up to
+    0.25 — Room 3 is the difficulty step right after Room 1."""
+    return GridWorld(
+        size=ROOM3_SIZE, start=ROOM3_START, goal=ROOM3_GOAL,
+        walls=ROOM3_WALLS, traps=ROOM3_TRAPS, slippery=ROOM3_SLIPPERY,
+        shortcuts=dict(ROOM3_SHORTCUTS),
+        slip_prob=slip_prob, step_reward=0.0,
+        goal_reward=ROOM3_GOAL_REWARD, trap_reward=trap_reward,
+    )
