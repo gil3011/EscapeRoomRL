@@ -7,7 +7,7 @@ from engine.boards import ROOM1_GOAL_REWARD, make_room1_grid
 from engine.dp_solver import policy_iteration, value_iteration
 from engine.grid_world import run_episode
 from engine.scoring import discounted_return
-from engine.storage import load_checkpoint, load_history, save_checkpoint, save_history
+from engine.storage import save_checkpoint, save_history
 from ui.charts import line_chart
 from ui.grid_render import render_grid
 
@@ -22,37 +22,31 @@ defaults = {
 for key, value in defaults.items():
     st.session_state.setdefault(f"{ROOM_ID}_{key}", value)
 
-# reload the last run from disk once per fresh session
-if st.session_state[f"{ROOM_ID}_history"] is None:
-    saved_history = load_checkpoint(ROOM_ID, "snapshots")
-    saved_meta = load_history(ROOM_ID)
-    if saved_history is not None and saved_meta is not None:
-        st.session_state[f"{ROOM_ID}_history"] = saved_history
-        st.session_state[f"{ROOM_ID}_v_start"] = saved_meta["v_start"]
-        st.session_state[f"{ROOM_ID}_gamma"] = saved_meta["gamma"]
+st.header("Room 1 controls")
 
-with st.sidebar:
-    st.header("Room 1 controls")
+theta = 1e-3  # fixed — not user-adjustable
+max_iterations = 150  # fixed — not user-adjustable
 
-    with st.expander("Environment", expanded=True):
-        slip_prob = st.slider("Slip probability", 0.0, 0.9, 0.2, 0.05)
-        st.caption(f"Goal reward: **{ROOM1_GOAL_REWARD:.0f}** (fixed — kept high so V(s) "
-                   "stays visible after discounting; not adjustable).")
-        trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0,
-                                 help="Stepping on a trap costs this much, but doesn't end the episode.")
+env_col, dp_col, attempt_col = st.columns(3)
+with env_col:
+    slip_prob = st.slider("Slip probability", 0.0, 0.9, 0.2, 0.05)
+    st.caption(f"Goal reward: **{ROOM1_GOAL_REWARD:.0f}** (fixed — kept high so V(s) "
+               "stays visible after discounting; not adjustable).")
+    trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0,
+                             help="Stepping on a trap costs this much, but doesn't end the episode.")
 
-    with st.expander("DP algorithm", expanded=True):
-        method = st.radio("Method", ["Value Iteration", "Policy Iteration"])
-        gamma = st.slider("Gamma (γ)", 0.5, 1.0, 0.9, 0.01)
-        theta = st.select_slider("Theta (θ)", [1e-2, 1e-3, 1e-4, 1e-5], value=1e-3)
-        max_iterations = st.slider("Max iterations", 10, 500, 200, 10)
+with dp_col:
+    method = st.radio("Method", ["Value Iteration", "Policy Iteration"])
+    gamma = st.slider("Gamma (γ)", 0.5, 1.0, 0.9, 0.01)
 
-    with st.expander("Escape attempt", expanded=False):
-        max_attempt_steps = st.slider("Max attempt steps", 20, 300, 150, 10)
+with attempt_col:
+    max_attempt_steps = st.slider("Max attempt steps", 20, 300, 150, 10)
 
-    col1, col2 = st.columns(2)
-    solve_clicked = col1.button("▶ Solve", use_container_width=True)
-    reset_clicked = col2.button("🔄 Reset", use_container_width=True)
+col1, col2 = st.columns(2)
+solve_clicked = col1.button("▶ Solve", use_container_width=True)
+reset_clicked = col2.button("🔄 Reset", use_container_width=True)
+
+st.divider()
 
 if reset_clicked:
     for key, value in defaults.items():
@@ -82,19 +76,32 @@ if solve_clicked:
         "method": method,
     })
 
-tab_info, tab_train, tab_board = st.tabs(["ℹ️ Info", "📈 Train", "🗺️ Board"])
+tab_info, tab_train, tab_board = st.tabs(["ℹ️ Info", "📈 Train Result", "🏁 Run episode"])
 
 with tab_info:
+    preview_grid = make_room1_grid(slip_prob=slip_prob, trap_reward=trap_reward)
+    st.plotly_chart(render_grid(preview_grid, title="Room 1 layout"), use_container_width=True)
+
     st.markdown(Path("docs/room1.md").read_text(encoding="utf-8"))
 
 with tab_train:
     history = st.session_state[f"{ROOM_ID}_history"]
     if history is None:
-        st.info("Configure parameters in the sidebar, then press ▶ Solve.")
+        st.info("Configure parameters above, then press ▶ Solve.")
     else:
+        grid = make_room1_grid(slip_prob=slip_prob, trap_reward=trap_reward)
         deltas = [h["delta"] for h in history]
         policy_changes = [h["policy_changes"] for h in history]
         v_start = st.session_state[f"{ROOM_ID}_v_start"]
+
+        st.subheader("Iteration snapshot")
+        idx = st.slider("Iteration", 0, len(history) - 1, len(history) - 1)
+        snap = history[idx]
+        fig = render_grid(grid, values=snap["V"], policy=snap["policy"],
+                           title=f"Iteration {idx + 1}/{len(history)}")
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("The value function and greedy policy as they stood after this many "
+                   "sweeps — drag the slider to watch both settle toward their final shape.")
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Iterations", len(history))
@@ -106,8 +113,13 @@ with tab_train:
 
         st.plotly_chart(line_chart({"max|ΔV|": deltas}, title="Convergence", log_y=True),
                          use_container_width=True)
+        st.caption("The biggest change to any cell's value on each sweep — trending down "
+                   "toward zero means V(s) has converged and stopped updating.")
+
         st.plotly_chart(line_chart({"policy changes": policy_changes}, title="Policy stability"),
                          use_container_width=True)
+        st.caption("How many states switched to a different preferred action on each sweep "
+                   "— reaching zero means the policy itself has stopped changing.")
 
         st.subheader("Recent iterations")
         n = min(20, len(history))
@@ -120,43 +132,34 @@ with tab_train:
 with tab_board:
     history = st.session_state[f"{ROOM_ID}_history"]
     if history is None:
-        st.info("Solve the room first to see the board.")
+        st.info("Solve the room first to run an episode.")
     else:
         grid = make_room1_grid(slip_prob=slip_prob, trap_reward=trap_reward)
         final_policy = history[-1]["policy"]
 
-        view = st.radio("View", ["📊 Iteration snapshot", "🏁 Escape attempt"], horizontal=True)
+        if st.button("🏁 Run escape attempt"):
+            path, rewards, steps, success = run_episode(grid, final_policy, max_attempt_steps)
+            solved_gamma = st.session_state[f"{ROOM_ID}_gamma"]
+            G = discounted_return(rewards, solved_gamma)
+            st.session_state[f"{ROOM_ID}_attempt_path"] = path
+            st.session_state[f"{ROOM_ID}_attempt_steps"] = steps
+            st.session_state[f"{ROOM_ID}_attempt_success"] = success
+            st.session_state[f"{ROOM_ID}_attempt_g"] = G
 
-        if view == "📊 Iteration snapshot":
-            idx = st.slider("Iteration", 0, len(history) - 1, len(history) - 1)
-            snap = history[idx]
-            fig = render_grid(grid, values=snap["V"], policy=snap["policy"],
-                               title=f"Iteration {idx + 1}/{len(history)}")
-            st.plotly_chart(fig, use_container_width=True)
+        path = st.session_state[f"{ROOM_ID}_attempt_path"]
+        if path is None:
+            st.caption("Click 'Run escape attempt' to roll out the solved policy once, with slip applied.")
         else:
-            if st.button("🏁 Run escape attempt"):
-                path, rewards, steps, success = run_episode(grid, final_policy, max_attempt_steps)
-                solved_gamma = st.session_state[f"{ROOM_ID}_gamma"]
-                G = discounted_return(rewards, solved_gamma)
-                st.session_state[f"{ROOM_ID}_attempt_path"] = path
-                st.session_state[f"{ROOM_ID}_attempt_steps"] = steps
-                st.session_state[f"{ROOM_ID}_attempt_success"] = success
-                st.session_state[f"{ROOM_ID}_attempt_g"] = G
+            step_idx = st.slider("Step", 0, len(path) - 1, 0)
+            fig = render_grid(grid, values=history[-1]["V"], policy=final_policy,
+                               agent_pos=path[step_idx], path=path, title="Escape attempt")
+            st.plotly_chart(fig, use_container_width=True)
 
-            path = st.session_state[f"{ROOM_ID}_attempt_path"]
-            if path is None:
-                st.caption("Click 'Run escape attempt' to roll out the solved policy once, with slip applied.")
-            else:
-                step_idx = st.slider("Step", 0, len(path) - 1, len(path) - 1)
-                fig = render_grid(grid, values=history[-1]["V"], policy=final_policy,
-                                   agent_pos=path[step_idx], title="Escape attempt")
-                st.plotly_chart(fig, use_container_width=True)
-
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Steps taken", st.session_state[f"{ROOM_ID}_attempt_steps"])
-                result = "✅ Escaped" if st.session_state[f"{ROOM_ID}_attempt_success"] else "❌ Failed"
-                c2.metric("Result", result)
-                c3.metric("G (this episode)", f"{st.session_state[f'{ROOM_ID}_attempt_g']:.2f}",
-                          help="The actual discounted return collected during this one rollout.")
-                c4.metric("V(start)", f"{st.session_state[f'{ROOM_ID}_v_start']:.2f}",
-                          help="What training predicted this state was worth — compare against G.")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Steps taken", st.session_state[f"{ROOM_ID}_attempt_steps"])
+            result = "✅ Escaped" if st.session_state[f"{ROOM_ID}_attempt_success"] else "❌ Failed"
+            c2.metric("Result", result)
+            c3.metric("G (this episode)", f"{st.session_state[f'{ROOM_ID}_attempt_g']:.2f}",
+                      help="The actual discounted return collected during this one rollout.")
+            c4.metric("V(start)", f"{st.session_state[f'{ROOM_ID}_v_start']:.2f}",
+                      help="What training predicted this state was worth — compare against G.")

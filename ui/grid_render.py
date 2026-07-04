@@ -17,7 +17,8 @@ from engine.grid_world import ACTION_ARROWS
 
 
 def render_grid(grid, values: dict | None = None, policy: dict | None = None,
-                 agent_pos: tuple[int, int] | None = None, title: str = "") -> go.Figure:
+                 agent_pos: tuple[int, int] | None = None, path: list[tuple[int, int]] | None = None,
+                 title: str = "") -> go.Figure:
     size = grid.size
     z = [[0.0] * size for _ in range(size)]
     if values:
@@ -37,7 +38,8 @@ def render_grid(grid, values: dict | None = None, policy: dict | None = None,
         cell_rect(i, j, "rgba(59,130,246,0.35)")
     for (i, j) in grid.traps:
         cell_rect(i, j, "rgba(239,68,68,0.35)")
-        fig.add_annotation(x=j, y=i, text="✕", showarrow=False, font=dict(size=20, color="#7f1d1d"))
+        fig.add_annotation(x=j, y=i, text=f"{grid.trap_reward:.0f}", showarrow=False,
+                            font=dict(size=14, color="#7f1d1d"))
 
     # the goal's stored V is always 0 (terminal states are never updated by the
     # solver), which would otherwise paint it as the *lowest*-value cell on the
@@ -57,6 +59,15 @@ def render_grid(grid, values: dict | None = None, policy: dict | None = None,
                 continue
             fig.add_annotation(x=j, y=i, text=ACTION_ARROWS[a], showarrow=False,
                                font=dict(size=16, color="#111827"))
+
+    if path:
+        # the full rollout trajectory, drawn faint so the current agent_pos marker
+        # (added below, on top) still stands out as the one that matters right now.
+        fig.add_trace(go.Scatter(x=[p[1] for p in path], y=[p[0] for p in path],
+                                  mode="lines+markers",
+                                  line=dict(color="rgba(236,72,153,0.5)", width=2),
+                                  marker=dict(size=6, color="rgba(236,72,153,0.5)"),
+                                  showlegend=False, hoverinfo="skip"))
 
     if agent_pos:
         # an annotation, not a trace, so it always renders above every shape
