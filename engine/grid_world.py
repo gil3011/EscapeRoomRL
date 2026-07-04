@@ -32,6 +32,10 @@ class GridWorld:
     # relocates the agent to its paired destination. Empty by default, so Room 1 and
     # any room that doesn't want them is unaffected. Room 3 (SARSA) is the first user.
     shortcuts: dict = field(default_factory=dict)
+    # subset of shortcut sources that are "trap doors" (bad teleports sending the agent
+    # backward). Purely a rendering hint so the shared renderer can colour them as a
+    # hazard instead of a helpful shortcut; mechanics are identical to any shortcut.
+    trap_door_sources: frozenset = field(default_factory=frozenset)
     slip_prob: float = 0.2
     step_reward: float = -0.04
     goal_reward: float = 1.0
@@ -46,7 +50,19 @@ class GridWorld:
         self.state = self.start
         return self.state
 
+    def initial_state(self):
+        """The state reset() returns. For plain grids that's just the start cell;
+        PatrolGridWorld overrides it to include the enemy's initial phase. The tabular
+        agents read V(start) from here so they work for either state shape."""
+        return self.start
+
     def is_terminal(self, state: tuple[int, int]) -> bool:
+        return state == self.goal
+
+    def is_goal(self, state) -> bool:
+        """Whether `state` is the success-terminal goal. Split out from is_terminal so
+        rooms with failure-terminal states (PatrolGridWorld's enemy collision) can tell
+        a win from a loss, and so a rollout knows if it actually escaped."""
         return state == self.goal
 
     def all_states(self) -> list[tuple[int, int]]:
@@ -57,19 +73,24 @@ class GridWorld:
             if (i, j) not in self.walls
         ]
 
-    def step(self, action: int):
-        if self.is_terminal(self.state):
-            raise ValueError("step() called on a terminal state; call reset() first")
-
+    def _sample_next_cell(self, cell: tuple[int, int], action: int) -> tuple[int, int]:
+        """Apply slip, then move: returns the resting cell (post any shortcut teleport).
+        No reward — just the physics of one agent move. Shared by step() and by
+        PatrolGridWorld, which reuses it for the agent while it advances the enemy."""
         actual_action = action
-        if self.state in self.slippery and self._rng.random() < self.slip_prob:
-            alternatives = [a for a in self._legal_actions(self.state) if a != action]
+        if cell in self.slippery and self._rng.random() < self.slip_prob:
+            alternatives = [a for a in self._legal_actions(cell) if a != action]
             if alternatives:
                 actual_action = self._rng.choice(alternatives)
             # no legal alternative to slip into (e.g. walled in on every other side):
             # the intended action just proceeds, slip_prob has nowhere to go this time.
+        return self._move(cell, actual_action)
 
-        next_state = self._move(self.state, actual_action)
+    def step(self, action: int):
+        if self.is_terminal(self.state):
+            raise ValueError("step() called on a terminal state; call reset() first")
+
+        next_state = self._sample_next_cell(self.state, action)
         reward, done = self._reward_for(next_state)
         self.state = next_state
         return next_state, reward, done, {}
@@ -160,7 +181,7 @@ def run_episode(grid: GridWorld, policy: dict, max_steps: int = 200):
         path.append(state)
         rewards.append(reward)
         if done:
-            return path, rewards, len(rewards), state == grid.goal
+            return path, rewards, len(rewards), grid.is_goal(state)
     return path, rewards, max_steps, False
 
 

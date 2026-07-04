@@ -4,7 +4,9 @@ from engine.boards import (
     ROOM1_GOAL, ROOM1_SIZE, ROOM1_SLIPPERY, ROOM1_START, ROOM1_TRAPS, ROOM1_WALLS,
     ROOM3_GOAL, ROOM3_SHORTCUT_DST, ROOM3_SHORTCUT_SRC, ROOM3_SIZE, ROOM3_SLIPPERY,
     ROOM3_START, ROOM3_TRAPS, ROOM3_WALLS,
-    make_room1_grid, make_room3_grid,
+    ROOM4_GOAL, ROOM4_PATROL_PATH, ROOM4_SIZE, ROOM4_SLIPPERY, ROOM4_START,
+    ROOM4_TRAPDOOR_DST, ROOM4_TRAPDOOR_SRC, ROOM4_TRAPS, ROOM4_WALLS,
+    make_room1_grid, make_room3_grid, make_room4_grid,
 )
 from engine.grid_world import ACTION_DELTAS
 
@@ -130,3 +132,79 @@ def test_room3_every_open_cell_has_a_legal_action():
     for s in grid.all_states():
         if not grid.is_terminal(s):
             assert actions_by_state.get(s), f"{s} has no legal action"
+
+
+# --- Room 4 (patrol enemy + trap door) ------------------------------------------
+
+def _timed_solve(start, goal, walls, size, shortcuts, patrol_path):
+    """Shortest slip-free path over (cell, phase) space, honouring the trap-door
+    teleport and enemy collisions (including swaps) — mirrors PatrolGridWorld."""
+    period = len(patrol_path)
+    start_state = (start, 0)
+    seen = {start_state}
+    queue = deque([(start_state, 0)])
+    while queue:
+        (cell, phase), d = queue.popleft()
+        if cell == goal:
+            return d
+        nphase = (phase + 1) % period
+        e_before, e_after = patrol_path[phase], patrol_path[nphase]
+        for n in _neighbors(cell, size):
+            if n in walls:
+                continue
+            ncell = shortcuts.get(n, n)
+            if ncell == e_after or (ncell == e_before and cell == e_after):
+                continue  # caught
+            ns = (ncell, nphase)
+            if ns not in seen:
+                seen.add(ns)
+                queue.append((ns, d + 1))
+    return None
+
+
+def test_room4_no_overlap_between_special_cells():
+    groups = [ROOM4_WALLS, ROOM4_TRAPS, ROOM4_SLIPPERY, set(ROOM4_PATROL_PATH),
+              {ROOM4_TRAPDOOR_SRC}, {ROOM4_TRAPDOOR_DST}, {ROOM4_START}, {ROOM4_GOAL}]
+    seen = set()
+    for group in groups:
+        overlap = seen & set(group)
+        assert not overlap, f"overlapping cells: {overlap}"
+        seen |= set(group)
+
+
+def test_room4_enemy_never_occupies_start_or_goal():
+    assert ROOM4_START not in ROOM4_PATROL_PATH
+    assert ROOM4_GOAL not in ROOM4_PATROL_PATH
+
+
+def test_room4_goal_reachable_and_no_isolated_pockets():
+    all_open = {(i, j) for i in range(ROOM4_SIZE) for j in range(ROOM4_SIZE)} - ROOM4_WALLS
+    reachable = _reachable_from(ROOM4_START, ROOM4_WALLS, ROOM4_SIZE)
+    assert ROOM4_GOAL in reachable
+    assert reachable == all_open
+
+
+def test_room4_trapdoor_destination_is_a_plain_backward_cell():
+    dst = ROOM4_TRAPDOOR_DST
+    assert dst not in ROOM4_WALLS
+    assert dst not in ROOM4_TRAPS
+    assert dst not in ROOM4_SLIPPERY
+    assert dst not in ROOM4_PATROL_PATH
+    assert dst not in (ROOM4_START, ROOM4_GOAL, ROOM4_TRAPDOOR_SRC)
+    assert sum(dst) < sum(ROOM4_TRAPDOOR_SRC), "trap door should send the agent backward"
+
+
+def test_room4_is_solvable_with_correct_timing():
+    d = _timed_solve(ROOM4_START, ROOM4_GOAL, ROOM4_WALLS, ROOM4_SIZE,
+                     {ROOM4_TRAPDOOR_SRC: ROOM4_TRAPDOOR_DST}, list(ROOM4_PATROL_PATH))
+    assert d is not None, "no timed path threads the patrol — board is unsolvable"
+    assert d >= 18
+
+
+def test_room4_factory_builds_a_consistent_patrol_grid():
+    grid = make_room4_grid()
+    assert grid.reset() == ((0, 0), 0)
+    assert grid.period == len(ROOM4_PATROL_PATH)
+    # the barrier gap: crossing column 5 is only possible at rows 3-6
+    open_col5 = [i for i in range(ROOM4_SIZE) if (i, 5) not in ROOM4_WALLS]
+    assert open_col5 == [3, 4, 5, 6]

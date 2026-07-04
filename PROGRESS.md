@@ -137,5 +137,40 @@
   clean `history.json` persistence round-trip. At the default config (3000 episodes, slip 0.25)
   the greedy policy escapes on 100% of 300 stochastic rollouts, averaging 11 steps (the
   shortcut-optimal path), using the shortcut 100% of the time, with V(start) ≈ 32 (≈ γ¹¹·100).
-- Next: **Sprint 4** — Room 4 (Q-Learning); Info tab contrasts off-policy `max` update vs. Room 3's
-  on-policy SARSA, reusing this room's page/agent structure.
+## Sprint 4 — Room 4: Q-Learning ✅
+- **Design decisions (locked with the user)**: make the board harder with two new mechanics —
+  a **moving patrol enemy** (headline) and a **trap door** (bad teleport). Slip stays 0.25;
+  a couple of non-terminal traps carry over. The patrol was chosen over a static cliff because
+  it *also* delivers the off-policy-vs-on-policy contrast (Q-learning cuts its timing close to the
+  patrol; SARSA would keep a safety buffer) **and** adds a second lesson (state augmentation).
+- **Key consequence — state augmentation**: a moving hazard breaks the Markov property if the
+  state is just the agent's cell, so Room 4's state is `(agent_cell, patrol_phase)`. Implemented
+  as `engine/patrol_world.py`'s `PatrolGridWorld(GridWorld)` — Rooms 1-3 and the DP solver are
+  untouched. Q-learning is model-free, so no augmented transition model is needed. The enemy
+  ping-pongs one cell/step; collision (including a swap-past) is failure-terminal with
+  `enemy_reward`; state space grows to ~85 cells × period 6 ≈ 510.
+- `engine/grid_world.py` — small backward-compatible touch-ups: `initial_state()` and `is_goal()`
+  (so agents/rollouts work for either state shape), a `trap_door_sources` field (render hint), and
+  factored the slip+move physics into `_sample_next_cell()` so `PatrolGridWorld` reuses it.
+- `engine/boards.py` — Room 4's fixed board: a column-5 wall barrier with a 4-row gap the enemy
+  patrols (so crossings must be *timed*), 3 traps, 8 slippery cells (kept off the crossing zone),
+  and a `(6,6)→(1,2)` trap door. Validated (no overlaps, goal reachable, enemy never on
+  start/goal, trap-door dst plain+backward, shortest timed solve over `(cell,phase)` = 18).
+- `engine/q_learning_agent.py` — off-policy TD(0); the **only** substantive difference from SARSA
+  is `max_a' Q(s',a')` vs the sampled `a'`, so it imports SARSA's shared helpers. Adds a
+  per-episode `outcome` (goal/caught/timeout) read from `step()`'s info for the Train-tab breakdown.
+- `pages/4_room4_q_learning.py` — twin of Room 3's page (same `TrainingRunner` wiring), plus: an
+  `enemy_reward` control, an outcome-breakdown chart, a **patrol-phase slider** on the Board tab
+  (V now depends on phase), and an escape replay that **animates the enemy alongside the agent**.
+  Augmented states are projected to a cell view per phase before rendering.
+- `ui/grid_render.py` — added `enemy_pos` + patrol-path drawing (👾, red trail); trap-door sources
+  render red (🕳️ → ↩) vs Room 3's teal shortcut, keyed off `grid.trap_door_sources`.
+- `docs/room4.md` — SARSA-vs-Q-learning side by side, the state-augmentation lesson, the
+  patrol/trap-door mechanics, a note on Q-learning's maximization bias, parameter glossary.
+- **Verified**: `pytest` 60/60 (added 8 patrol-world, 6 Room 4 board, 5 Q-learning tests); AppTest
+  smoke run trained → Train/Board tabs (phase slider + enemy-animated replay) → persistence
+  round-trip, zero exceptions. At the default config (5000 episodes, slip 0.25) the greedy policy
+  escapes 100% of 300 stochastic rollouts, 0% caught, averaging 18 steps (the optimal timed solve),
+  with a realistic ~2-3% caught rate late in training as residual ε bumps the patrol.
+- Next: **Sprint 5** — Room 5a (continuous physics engine, `ContinuousWorld`) — the first
+  non-grid room; independent of Rooms 1/3/4.

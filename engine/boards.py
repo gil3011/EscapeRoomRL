@@ -8,6 +8,7 @@ reachable from start, no isolated pockets — see tests/test_boards.py) and froz
 here as plain constants.
 """
 from engine.grid_world import GridWorld
+from engine.patrol_world import PatrolGridWorld
 
 ROOM1_SIZE = 10
 ROOM1_START = (0, 0)
@@ -86,4 +87,59 @@ def make_room3_grid(slip_prob: float = 0.25, trap_reward: float = -20.0) -> Grid
         shortcuts=dict(ROOM3_SHORTCUTS),
         slip_prob=slip_prob, step_reward=0.0,
         goal_reward=ROOM3_GOAL_REWARD, trap_reward=trap_reward,
+    )
+
+
+# --- Room 4 (Q-learning) --------------------------------------------------------
+# The hardest grid room: Room 3's mix (walls/traps/slippery) plus two new mechanics —
+# a moving patrol enemy and a trap door. A vertical wall barrier at column 5 leaves a
+# 4-row gap (rows 3-6) that every crossing must pass through; the enemy ping-pongs up
+# and down that gap, so the crossing has to be *timed*. The trap door (6,6)->(1,2) is a
+# tempting cell just past the chokepoint that flings the agent back near the start.
+# Validated (no overlaps; enemy never on start/goal; goal reachable; trap-door dst is a
+# plain backward cell; shortest timed solve over (cell,phase) space is 18 steps).
+ROOM4_SIZE = 10
+ROOM4_START = (0, 0)
+ROOM4_GOAL = (9, 9)
+
+ROOM4_WALLS = frozenset({
+    (0, 5), (1, 5), (2, 5), (7, 5), (8, 5), (9, 5),  # the barrier, with a rows 3-6 gap
+    (2, 2), (2, 3),
+    (6, 2), (7, 2),
+    (4, 8), (5, 8),
+})
+ROOM4_TRAPS = frozenset({(3, 7), (6, 3), (1, 8)})
+# kept away from the crossing zone so the on/off-policy behaviour gap near the patrol is
+# driven by ε-exploration risk, not by slip noise.
+ROOM4_SLIPPERY = frozenset({
+    (1, 1), (8, 1), (1, 6), (8, 7),
+    (3, 1), (9, 2), (2, 9), (7, 8),
+})
+
+# ping-pong patrol up and down the gap in column 5. Stored as the full cycle, so
+# period = len(path) and enemy_cell(phase) = path[phase].
+_ROOM4_PATROL_SEG = [(3, 5), (4, 5), (5, 5), (6, 5)]
+ROOM4_PATROL_PATH = _ROOM4_PATROL_SEG[:-1] + _ROOM4_PATROL_SEG[:0:-1]
+
+# trap door: a bad teleport (source listed in trap_door_sources so it renders as a hazard)
+ROOM4_TRAPDOOR_SRC = (6, 6)
+ROOM4_TRAPDOOR_DST = (1, 2)
+ROOM4_SHORTCUTS = {ROOM4_TRAPDOOR_SRC: ROOM4_TRAPDOOR_DST}
+
+ROOM4_GOAL_REWARD = 100.0    # fixed, matching the family, so V(start) stays comparable
+ROOM4_ENEMY_REWARD = -100.0  # default terminal collision penalty (tunable in the sidebar)
+
+
+def make_room4_grid(slip_prob: float = 0.25, trap_reward: float = -20.0,
+                    enemy_reward: float = ROOM4_ENEMY_REWARD) -> PatrolGridWorld:
+    """Room 4's fixed board with the moving patrol enemy and trap door. Same reward
+    convention as Rooms 1/3 (no step cost, fixed goal reward), plus a terminal
+    enemy_reward on collision."""
+    return PatrolGridWorld(
+        size=ROOM4_SIZE, start=ROOM4_START, goal=ROOM4_GOAL,
+        walls=ROOM4_WALLS, traps=ROOM4_TRAPS, slippery=ROOM4_SLIPPERY,
+        shortcuts=dict(ROOM4_SHORTCUTS), trap_door_sources=frozenset({ROOM4_TRAPDOOR_SRC}),
+        patrol_path=list(ROOM4_PATROL_PATH), enemy_reward=enemy_reward,
+        slip_prob=slip_prob, step_reward=0.0,
+        goal_reward=ROOM4_GOAL_REWARD, trap_reward=trap_reward,
     )

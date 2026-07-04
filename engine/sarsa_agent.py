@@ -145,7 +145,7 @@ def train_sarsa(grid, *, episodes: int, gamma: float = 0.9, alpha: float = 0.2,
         "Q": Q,
         "policy": policy,
         "values": values,
-        "v_start": values[grid.start],
+        "v_start": values[grid.initial_state()],
         "episodes_run": episodes_run,
     }
     if emit is not None:
