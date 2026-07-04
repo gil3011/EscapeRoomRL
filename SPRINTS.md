@@ -7,17 +7,25 @@ git commit (per [plan.md](plan.md) §7). Update `PROGRESS.md` at the end of ever
 Mapping back to [plan.md](plan.md) §9's phases (Room 5 and Room 6 are each split in two here,
 since their physics/observation logic is worth validating before any training is wired up):
 
+**Reordering note**: Room 2 (Monte Carlo) is the one room the spec doesn't require — it was
+inserted per plan.md §1 as a "nice to have" between DP and SARSA. Rooms 1, 3, 4, 5, 6 are the
+mandatory arc (DP → SARSA → Q-Learning → continuous DQN → dynamic obstacles, matching the
+original spec order). To de-risk the mandatory scope first, Room 2's sprint has been moved to
+run *after* Room 6, immediately before final polish, instead of between Room 1 and Room 3. Phase
+numbers in plan.md §9 are unchanged (Phase 2 is still "Room 2 — Monte Carlo"); only the sprint
+execution order below changes.
+
 | Sprint | plan.md phase | Scope |
 |---|---|---|
 | 1 | Phase 0 | Scaffolding |
 | 2 | Phase 1 | Room 1 — Dynamic Programming |
-| 3 | Phase 2 | Room 2 — Monte Carlo |
-| 4 | Phase 3 | Room 3 — SARSA |
-| 5 | Phase 4 | Room 4 — Q-Learning |
-| 6 | Phase 5a | Room 5 — continuous physics engine |
-| 7 | Phase 5b | Room 5 — DQN integration & UI |
-| 8 | Phase 6a | Room 6 — obstacles & partial observation |
-| 9 | Phase 6b | Room 6 — training, generalization test & polish |
+| 3 | Phase 3 | Room 3 — SARSA |
+| 4 | Phase 4 | Room 4 — Q-Learning |
+| 5 | Phase 5a | Room 5 — continuous physics engine |
+| 6 | Phase 5b | Room 5 — DQN integration & UI |
+| 7 | Phase 6a | Room 6 — obstacles & partial observation |
+| 8 | Phase 6b | Room 6 — training, generalization test & polish |
+| 9 | Phase 2 | Room 2 — Monte Carlo (optional, moved after the mandatory arc) |
 | 10 | Phase 7 | Final polish |
 
 ---
@@ -214,78 +222,321 @@ patrol-enemy tiles → §6 stretch in plan.md).
 
 ---
 
-## Sprint 3 — Room 2: Monte Carlo
-**Goal**: first model-free room; reuses Sprint 2's page pattern almost unchanged.
+## Sprint 3 — Room 3: SARSA
+**Goal**: first model-free room built (unknown-model framing — the agent only ever calls
+`step()`) and first TD-learning room; reuses Sprint 2's page pattern almost unchanged. Runs
+directly after Room 1 since Room 2 (Monte Carlo) has been moved to Sprint 9 — see the
+reordering note at the top of this file.
 **Depends on**: Sprint 2.
 
-Backlog:
-- [ ] `engine/monte_carlo_agent.py` — first-visit MC control, ε-greedy, exploring-starts toggle
-- [ ] `pages/2_room2_monte_carlo.py`
-- [ ] `docs/room2.md`
-- [ ] Train tab: reward/steps per episode, ε decay, visit-count heatmap
-- [ ] Board tab: policy/value heatmap, episode-checkpoint replay slider, escape attempt
+### Design decisions (locked in with you before writing the backlog)
+Three open questions from plan.md's original Room 3 sketch, decided together:
+1. **Board is fixed and hand-designed**, like Room 1 — not procedurally regenerated. A second
+   static board lives in `engine/boards.py` alongside Room 1's, authored the same way (seeded
+   random-walk wall clusters, then validated and frozen). No "regenerate grid" sidebar control.
+2. **Reward model matches Room 1 exactly**: no step cost, a fixed high goal reward, trap cost
+   tunable. Discounting alone shapes V(s) — keeps V(start) on a comparable scale across the
+   lobby scoreboard instead of every room inventing its own reward magnitude.
+3. **Terrain matches Room 1's full mix** (walls, non-terminal traps, slippery cells) **plus one
+   new mechanic: a shortcut tile.** Stepping onto the shortcut cell — deliberately or via a slip
+   — instantly relocates the agent to a paired destination cell elsewhere on the board. This is
+   plan.md §6's "shortcut tiles" stretch idea, pulled forward into this room's core scope instead
+   of staying optional, since it gives the unknown-model room something to actually *discover*
+   through experience rather than just re-skinning Room 1 with a new algorithm.
 
-**Definition of Done**: same shape as Sprint 2's DoD, for Room 2; toggling exploring-starts
-visibly changes early-episode behavior.
-**Out of scope**: Rooms 3+.
+### The board — static, not procedurally generated
+Same convention as Room 1's `make_room1_grid`: `engine/boards.py` gets `ROOM3_WALLS`/
+`ROOM3_TRAPS`/`ROOM3_SLIPPERY`/`ROOM3_SHORTCUT`/`ROOM3_START`/`ROOM3_GOAL`/`ROOM3_GOAL_REWARD`
+constants plus a `make_room3_grid(slip_prob, trap_reward) -> GridWorld` factory. 10×10,
+`start=(0,0)`, `goal=(9,9)` — same corners as Room 1, so the two rooms read as "the same kind of
+place," just with different obstacles.
+
+Generation method (mirrors Room 1's Sprint 2 methodology — exact coordinates get frozen during
+implementation, once validated, and recorded here and in PROGRESS.md the way Room 1's were):
+- **Walls**: ~13 cells in small clusters via the same seeded-random-walk-and-grow approach as
+  Room 1, just a different seed so the layout isn't a copy.
+- **Traps**: 3 cells, non-terminal, same mechanic as Room 1 (`trap_reward` cost, episode
+  continues).
+- **Slippery cells**: 10 cells. Default `slip_prob` nudged up from Room 1's 0.2 to **0.25** —
+  Room 3 is now the room right after Room 1 in the mandatory arc, so it still carries the
+  "difficulty nudges up" intent from plan.md even with Room 2 (MC) no longer sitting between them.
+- **Shortcut tile** (new): one `(src) -> (dst)` pair. Placed so using it meaningfully shortens
+  the optimal path (target: ≥3 steps saved vs. not using it) without trivializing the room
+  (target: shortest path with the shortcut still ≥6-8 steps) — checked with the same kind of BFS
+  sanity check `test_boards.py` already runs for reachability. `dst` must land on a plain open
+  cell — not a wall, trap, slippery cell, or the start/goal — so its effect is just "you're now
+  somewhere else," nothing compounds.
+
+### Engine change — shortcut tiles (shared, not Room-3-only)
+`GridWorld` gains an optional field: `shortcuts: dict[tuple[int,int], tuple[int,int]] = field(default_factory=dict)`
+(default empty, so Room 1 and any future room are unaffected). In `_move()`, after the existing
+wall/edge check computes a landing cell, if that cell is a shortcut source its destination
+replaces it as the actual landing cell — so `step()`, `transition_model()`, and slip's
+alternative-direction draw all see the teleport automatically, for free, since they all already
+funnel through `_move()`/`_legal_actions()`. Reward is computed from the *final* (post-teleport)
+resting cell, same as any other move. Slipping onto a shortcut cell triggers it too — the tile
+doesn't care whether you meant to step there.
+- [ ] `engine/grid_world.py`: add `shortcuts` field + `_move()` handling
+- [ ] `tests/test_grid_world.py`: stepping onto a shortcut cell relocates to its destination;
+  a slip that lands on a shortcut cell also relocates; `transition_model()` outcomes reflect the
+  teleport (Room 1 doesn't use shortcuts, but the model must stay correct for any room that does)
+
+### Algorithm (`engine/sarsa_agent.py`) — on-policy TD(0), off the reference example
+Adapted from `code examples/sarsa.py`, retargeted onto `GridWorld`'s `(state, action)` API
+instead of the example's string-keyed grid:
+- Q-table as a plain dict keyed by `(state, action)` (or `state -> {action: value}`, whichever
+  reads cleaner against `GridWorld`'s tuple states).
+- ε-greedy **behavior policy** selects both the action taken *and* the bootstrapped next action:
+  `Q(s,a) ← Q(s,a) + α·[r + γ·Q(s',a') − Q(s,a)]` where `a'` is the ε-greedy pick at `s'`, not
+  the greedy max — this is what makes it on-policy (it learns about the policy it's actually
+  running, exploration risk included), and is the thing Room 4's docs will contrast it against.
+- ε decays from `epsilon_start` to `epsilon_end` (linear, over a configurable fraction of total
+  episodes); α optionally decays the same way if the "decay α" toggle is on, otherwise stays
+  constant.
+- Runs on Sprint 1's `TrainingRunner` background thread — unlike Room 1's instant DP solve, this
+  is genuinely episode-by-episode learning and belongs in the shared 3-button (▶ Train / ⏹ Stop
+  / 🔄 Reset) + `queue.Queue` pattern every later room also uses.
+- A checkpoint (Q-table snapshot + one greedy rollout trajectory) is saved every
+  `snapshot_interval` episodes for the Board tab's replay slider (plan.md §2.4).
+
+### Scoring — same convention as Room 1
+- **V(start)** = `max_a Q(start, a)` from the final Q-table (plan.md §2.2 — Rooms 2-4 derive V
+  from the learned Q-table). Saved to `runs/room3/history.json` every training run; read by the
+  lobby scoreboard.
+- **G** — one stochastic escape-attempt rollout of the final ε=0 (fully greedy) policy, via the
+  same `run_episode()` + `discounted_return()` used by Room 1. Shown on the Board tab next to
+  V(start), not persisted as a "best."
+
+### Training parameters (sidebar)
+**Environment** (board structure and goal reward fixed, same two knobs as Room 1)
+- `slip_prob` — slider 0.0–0.9, default **0.25**
+- `trap_reward` — slider -100.0–-1.0, default **-20.0**
+
+**SARSA algorithm**
+- `alpha` — slider 0.01–1.0, default **0.2**
+- decay α toggle — off by default; when on, α decays the same schedule as ε
+- `gamma` — slider 0.5–1.0, default **0.90** (matches Room 1, keeps V comparable)
+- `epsilon_start` — slider 0.0–1.0, default **1.0**
+- `epsilon_end` — slider 0.0–0.5, default **0.05**
+- `epsilon_decay_fraction` — slider 0.1–1.0, default **0.8** (fraction of `episode_count` over
+  which ε linearly decays; stays at `epsilon_end` after that)
+- `episode_count` — slider 100–10000, default **3000**
+- `max_steps_per_episode` — slider 20–500, default **200** (safety cap — an early ε=1 policy can
+  wander a long time on a slippery, shortcut-bearing grid)
+- `snapshot_interval` — slider 10–500, default **50**
+
+**Escape attempt**
+- `max_attempt_steps` — slider 20–300, default **150** (matches Room 1)
+
+### Charts & metrics
+**Train tab**
+- Metrics row: episodes trained, final ε, V(start)
+- Chart 1 — reward per episode (raw + smoothed, same idea as the LunarLander example)
+- Chart 2 — steps per episode
+- Chart 3 — mean \|TD-error\| per episode (average of `|r + γQ(s',a') − Q(s,a)|` over the
+  episode's steps)
+- Chart 4 — ε (and α, if decaying) per episode
+
+**Board tab**
+- Same two-view pattern as Room 1: **📊 Checkpoint snapshot** (slider over saved checkpoints,
+  `render_grid` shows the Q-derived value heatmap + greedy-policy arrows as of that checkpoint)
+  vs. **🏁 Escape attempt** (click to run one ε=0 rollout, step slider scrubs `agent_pos`; steps
+  taken / success / G shown next to V(start))
+- `ui/grid_render.py` gets a new shortcut marker (distinct color/icon) plus a line/arrow from the
+  source cell to its destination, so the mechanic is visible before the agent even has to explain
+  it
+
+### docs/room3.md outline
+- What Room 3 knows vs. Room 1: Room 1 had the full transition model and solved Bellman's
+  equation directly with zero environment interaction; Room 3 only ever calls `step()` and must
+  learn `Q(s,a)` purely from experienced transitions — the model is "unknown" not because it's
+  hidden, but because the algorithm never looks at it.
+- The SARSA update rule, spelled out, with "on-policy" explained as "learns about the same
+  ε-greedy policy it's using to act — including the exploration risk it sometimes takes."
+  Placeholder note that Room 4 uses the same board/engine but an off-policy `max` update, full
+  side-by-side saved for Room 4's own docs.
+- The shortcut tile: stepping on it (on purpose or via a slip) instantly relocates you elsewhere
+  — something to discover from experience, exactly like learning to route around the trap.
+- Parameter glossary: slip probability, trap reward, α (+ decay toggle), γ, ε schedule, episode
+  count, max steps/episode, snapshot interval.
+
+### Backlog
+- [x] `engine/grid_world.py` — `shortcuts` field + `_move()` handling (see Engine change above);
+  added a public `legal_actions()` accessor for the model-free rooms
+- [x] `tests/test_grid_world.py` — shortcut relocation, including via slip, and in the transition model
+- [x] `engine/boards.py` — `ROOM3_WALLS`/`ROOM3_TRAPS`/`ROOM3_SLIPPERY`/`ROOM3_SHORTCUT_SRC`/
+  `ROOM3_SHORTCUT_DST`/`ROOM3_START`/`ROOM3_GOAL`/`ROOM3_GOAL_REWARD` + `make_room3_grid(slip_prob, trap_reward)`
+- [x] `tests/test_boards.py` — Room 3 board: reachability, no overlapping special cells, shortcut
+  destination is a plain cell, shortcut saves 7 steps (18→11) without trivializing the room
+- [x] `engine/sarsa_agent.py` — Q-table, ε-greedy behavior policy, on-policy TD(0) update, ε (and
+  optional α) decay, per-episode metrics; runs on `TrainingRunner`, emits metrics/result
+- [x] `tests/test_sarsa_agent.py` — learns to reach the goal; solves Room 3 and provably uses the
+  shortcut; ε/α decay; checkpoint bookkeeping; stop-flag halts training
+- [x] `pages/3_room3_sarsa.py` — controls (env/SARSA/exploration), Info/Train/Board tabs,
+  `TrainingRunner` wiring (▶ Train / ⏹ Stop / 🔄 Reset) with a live-updating rerun loop
+- [x] `ui/grid_render.py` — shortcut tile marker (🌀→◎, teal) + dashed destination line
+- [x] `docs/room3.md` — known-vs-unknown framing, SARSA update rule, shortcut, parameter glossary
+- [x] `runs/room3/` persistence: history (reward/steps/TD-error/ε/α per episode, `v_start`, `gamma`,
+  env params), periodic checkpoints (policy + values + greedy rollout trajectory)
+
+**Verified**: full suite 41/41 passing; AppTest smoke run trains → Train/Board tabs → escape
+attempt with zero exceptions and a persistence round-trip; at the default config (3000 episodes,
+slip 0.25) the greedy policy reaches the goal 100% of 300 stochastic rollouts, averaging 11 steps
+(the shortcut-optimal path) and using the shortcut 100% of the time, V(start) ≈ 32.
+
+**Definition of Done**: every tunable Room 3 parameter works from the sidebar (board structure
+fixed); training shows live reward/steps/TD-error/ε curves; any checkpoint's Q-derived
+policy/value can be replayed on the board; an escape attempt reports G next to V(start), with G
+clustering near V; the trained policy visibly uses the shortcut tile when it helps and routes
+around the trap; reopening the app reloads Room 3's last run from disk; `test_grid_world.py`,
+`test_boards.py`, and `test_sarsa_agent.py` pass.
+**Out of scope**: Room 4+; further dynamic extras beyond this room's fixed walls/traps/shortcut
+(bonus/patrol-enemy tiles → §6 stretch in plan.md).
 
 ---
 
-## Sprint 4 — Room 3: SARSA
-**Goal**: first TD-learning room.
+## Sprint 4 — Room 4: Q-Learning
+**Goal**: complete the mandatory grid-room pair with the hardest board yet, and make the
+off-policy vs. on-policy contrast against Room 3 *visible on the board*, not just stated in text.
 **Depends on**: Sprint 3.
 
-Backlog:
-- [ ] `engine/sarsa_agent.py`
-- [ ] `pages/3_room3_sarsa.py`
-- [ ] `docs/room3.md`
-- [ ] Train tab: reward/steps per episode, mean |TD-error|, ε/α curves
-- [ ] Board tab: same pattern as Rooms 1-2
+### Design decisions (locked in with you)
+Two new mechanics were chosen to make Room 4 harder than Room 3:
+1. **Moving patrol enemy** (headline). A hazard that moves one cell along a fixed **ping-pong**
+   patrol **every agent step**; colliding with it is a **failure-terminal** state (`enemy_reward`,
+   a large penalty) — the first room you can actually *lose*. Consequence, and the room's second
+   lesson: a moving hazard breaks the Markov property if the state is just the agent's cell, so
+   the state is **augmented to `(agent_cell, patrol_phase)`**. The enemy's motion is deterministic,
+   so `patrol_phase` (its position in the cycle) is all that's needed to make the future
+   predictable again. This grows the tabular problem from ~85 states to ~85·P (P = patrol period,
+   kept short) — still small, still fast to train.
+2. **Trap door** (bad teleport). Reuses Room 3's `shortcuts` engine, but the destination sets the
+   agent **backward** toward the start. A tempting-looking cell to learn to avoid.
 
-**Definition of Done**: trains to a working exit policy on the default slippery grid; checkpoint
-replay visibly improves from early to late episodes.
-**Out of scope**: Room 4+.
+Defaults baked in (correct here if wrong): enemy moves every step; **slip stays 0.25** (not
+raised); keep 2-3 non-terminal traps for family continuity; patrol-adjacent cells are kept
+**non-slippery** so the SARSA-vs-Q-learning behavioural difference is driven by ε-exploration, not
+by slip noise.
+
+### Engine — `PatrolGridWorld(GridWorld)` in `engine/patrol_world.py`
+Subclass so Rooms 1-3 and the DP solver are untouched. Q-learning is model-free, so **no augmented
+`transition_model()` is needed** — only `reset`/`step`/`is_terminal`/`all_states`/`legal_actions`.
+- `patrol_path: list[cell]` — the full cyclic sequence the enemy visits (the ping-pong trip out
+  *and* back), so `period = len(patrol_path)` and `enemy_cell(phase) = patrol_path[phase]`.
+- State everywhere is `(agent_cell, phase)`. `reset()` → `(start, 0)`. `step(action)`:
+  1. move the agent with the inherited `_move()` (walls / slip / trap-door teleport all reused);
+  2. advance `phase → (phase+1) % period`;
+  3. collision if the agent's new cell equals the enemy's new cell, **or** they swapped past each
+     other in the step → terminal, `enemy_reward`, `info={"outcome": "caught"}`;
+  4. else if new cell is the goal → terminal, goal reward, `info={"outcome": "goal"}`;
+  5. else non-terminal (trap cost applies as usual), continue.
+- `is_terminal((cell, phase))` → `cell == goal or cell == enemy_cell(phase)`.
+- `all_states()` → `[(cell, phase) for cell in open cells for phase in range(period)]`.
+- `legal_actions((cell, phase))` → inherited `legal_actions(cell)` (movement ignores phase).
+- `initial_state()` → `(start, 0)`.
+
+### Shared-engine touch-ups (small, backward-compatible)
+- `GridWorld.initial_state()` → returns `self.start`; `PatrolGridWorld` overrides it. The tabular
+  agents use this instead of `grid.start` for V(start), so they work for both state shapes.
+- `GridWorld.trap_door_sources: frozenset` (default empty) — lets the shared renderer tell a bad
+  teleport (Room 4, warning colour) from a helpful shortcut (Room 3, teal). Room 3 unaffected.
+
+### Board — static, `engine/boards.py`
+`ROOM4_*` constants + `make_room4_grid(slip_prob, trap_reward, enemy_reward) -> PatrolGridWorld`.
+Same 10×10, `start=(0,0)`, `goal=(9,9)` corners. Walls/traps/slippery authored like Room 3 (own
+seed), plus:
+- **Patrol path**: a ping-pong segment placed to guard a corridor on/near the optimal route, so
+  timing past it matters. Kept off the slippery cells and clear of the start/goal cells (validated:
+  start and goal are never the enemy cell at any phase; the agent can reach the goal for at least
+  one phase offset — a BFS over `(cell, phase)` space confirms solvability).
+- **Trap door**: one `(src → dst)` in `shortcuts` with `dst` closer to the start, `src` listed in
+  `trap_door_sources`. `dst` is a plain cell (validated, same as Room 3's shortcut checks).
+
+### Algorithm — `engine/q_learning_agent.py`
+Off-policy TD(0), adapted from `code examples/q_learning.py`. Imports the shared helpers already in
+`sarsa_agent.py` (`_epsilon_greedy`, `greedy_policy`, `q_values`, `_linear_decay`) — the **only**
+difference from SARSA is the target:
+`Q(s,a) ← Q(s,a) + α[r + γ·max_a' Q(s',a') − Q(s,a)]` (greedy max, not the sampled `a'`).
+Same ε/α decay, checkpoints, and metrics as SARSA, **plus** a per-episode `outcome` ("goal" /
+"caught" / "timeout") read from `step()`'s `info` so the Train tab can chart escape/caught/timeout
+rates. States are treated opaquely, so the same loop runs over `(cell, phase)` states unchanged.
+
+### Scoring — same convention
+V(start) = `max_a Q(initial_state(), a)` = value at `(start, phase 0)`; saved to
+`runs/room4/history.json` for the lobby. G = discounted return of one greedy escape rollout (enemy
+and slip both live), shown next to V on the Board tab.
+
+### Rendering — `ui/grid_render.py`
+- `enemy_pos` parameter → draw the patroller (distinct marker, e.g. 👾) and its patrol path faintly.
+- Trap-door sources (in `grid.trap_door_sources`) drawn in a warning colour (red 🕳️) with a
+  backward destination line, instead of the teal 🌀 used for helpful shortcuts.
+- The Room 4 page projects augmented states to a cell view for a chosen phase before calling the
+  renderer: `values_cell = {cell: values[(cell, φ)] ...}`, likewise policy, plus `enemy_pos = enemy_cell(φ)`.
+
+### Sidebar (Room 3's set + one)
+slip prob (0.25), trap reward (-20), **enemy_reward** (e.g. -100..-20, default -100), α + decay,
+γ (0.9), ε start/end/decay-fraction, episodes (default nudged up — validate; expect ~5000-8000 to
+converge on the larger state space), max steps/episode, snapshot interval, max attempt steps.
+
+### Train / Board tabs
+- **Train**: reward/steps/mean|TD|/ε curves (as Room 3) + a stacked/area chart of the
+  escaped/caught/timeout rate over a moving window of episodes.
+- **Board**: 📊 checkpoint snapshot (with a **patrol-phase slider** to pick the enemy position the
+  heatmap/policy is shown for) vs. 🏁 escape attempt (replay animates **both** agent and enemy; the
+  step slider advances phase in lock-step). G reported next to V(start).
+
+### Backlog
+- [ ] `engine/grid_world.py` — `initial_state()`, `trap_door_sources` field
+- [ ] `engine/patrol_world.py` — `PatrolGridWorld` (augmented state, moving enemy, collision)
+- [ ] `tests/test_patrol_world.py` — enemy advances deterministically; collision (incl. swap) is
+  terminal with `enemy_reward`; reaching the goal is terminal; `all_states`/`legal_actions`/
+  `is_terminal` handle `(cell, phase)`; a slip/trap-door teleport still works under the subclass
+- [ ] `engine/boards.py` — `ROOM4_*` constants + `make_room4_grid(...)`
+- [ ] `tests/test_boards.py` — Room 4: no overlaps, goal reachable at some phase (BFS over
+  `(cell, phase)`), enemy never starts on start/goal, trap-door dst is a plain backward cell
+- [ ] `engine/q_learning_agent.py` — off-policy target, per-episode outcome, shared helpers
+- [ ] `tests/test_q_learning_agent.py` — solves a small deterministic grid; on Room 4 the greedy
+  policy escapes without being caught most of the time; matches SARSA on an enemy-free grid;
+  off-policy target differs from SARSA on a hand-built case
+- [ ] `pages/4_room4_q_learning.py` — sidebar, Info/Train/Board with phase slider + enemy replay,
+  `TrainingRunner` wiring
+- [ ] `ui/grid_render.py` — `enemy_pos` + patrol path; trap-door (red) vs shortcut (teal) styling
+- [ ] `docs/room4.md` — SARSA-vs-Q-learning side by side, the state-augmentation lesson, the
+  patrol/trap-door mechanics, parameter glossary
+- [ ] `runs/room4/` persistence (history incl. outcome rates, checkpoints)
+
+**Definition of Done**: every tunable Room 4 parameter works from the sidebar; training shows the
+reward/TD/ε curves **and** the escaped/caught/timeout breakdown; the checkpoint slider (with phase
+control) replays the learned policy; an escape attempt animates the agent timing past the patrol
+and reports G next to V(start); at the default config the greedy policy reaches the goal
+meaningfully more often than it's caught, and the Info tab clearly explains — and the board visibly
+shows — the off-policy `max` update vs. Room 3's on-policy SARSA. Full test suite passes.
+**Out of scope**: bonus/pickup tiles and any remaining §6 stretch toggles; moving obstacles in the
+continuous rooms (Rooms 5-6).
 
 ---
 
-## Sprint 5 — Room 4: Q-Learning
-**Goal**: complete the grid-room arc; Info tab explicitly contrasts on-policy vs. off-policy
-against Room 3.
-**Depends on**: Sprint 4.
-
-Backlog:
-- [ ] `engine/q_learning_agent.py`
-- [ ] `pages/4_room4_q_learning.py`
-- [ ] `docs/room4.md` (incl. SARSA-vs-Q-learning comparison)
-- [ ] Train/Board tabs: same pattern
-
-**Definition of Done**: trains successfully; Info tab clearly explains the update-rule
-difference from Room 3.
-**Out of scope**: any plan.md §6 stretch toggle (enemy/trap/bonus/shortcut) — deferred to Sprint 10.
-
----
-
-## Sprint 6 — Room 5a: continuous physics engine
+## Sprint 5 — Room 5a: continuous physics engine
 **Goal**: get `ContinuousWorld` physics right and visually verified *before* touching DQN, so a
 training failure later is unambiguously an algorithm problem, not a physics bug.
-**Depends on**: Sprint 1 (independent of Rooms 1-4).
+**Depends on**: Sprint 1 (independent of Rooms 1, 3, 4).
 
 Backlog:
 - [ ] `engine/continuous_world.py` — position/velocity integration, 9-action mapping, boundary clipping, goal-zone detection
 - [ ] `ui/continuous_render.py` — room boundary, start, goal zone, agent position + velocity arrow
 - [ ] `tests/test_continuous_world.py`
 - [ ] Scratch harness driving a few fixed action sequences to confirm trajectories render correctly
-- [ ] Add CPU-only `torch` to `requirements.txt` ahead of Sprint 7
+- [ ] Add CPU-only `torch` to `requirements.txt` ahead of Sprint 6
 
 **Definition of Done**: a fixed/manual action sequence produces a visually correct,
 boundary-respecting trajectory in the Plotly renderer; unit tests pass.
-**Out of scope**: DQN, reward shaping, the actual Room 5 page (Sprint 7).
+**Out of scope**: DQN, reward shaping, the actual Room 5 page (Sprint 6).
 
 ---
 
-## Sprint 7 — Room 5b: DQN integration & UI
+## Sprint 6 — Room 5b: DQN integration & UI
 **Goal**: wire the validated physics engine to a trained policy and the full room page.
-**Depends on**: Sprint 6.
+**Depends on**: Sprint 5.
 
 Backlog:
 - [ ] `engine/dqn_agent.py` adapted from `code examples/dql/dqn.py` (`obs_dim=4`, `n_actions=9`)
@@ -301,10 +552,10 @@ early-vs-late trajectories; escape attempt reports time-to-exit.
 
 ---
 
-## Sprint 8 — Room 6a: obstacles & partial observation
+## Sprint 7 — Room 6a: obstacles & partial observation
 **Goal**: get obstacle generation, collision, and the K-nearest observation window right and
 visually verified before training.
-**Depends on**: Sprint 7 (reuses `ContinuousWorld` + `DQNAgent`).
+**Depends on**: Sprint 6 (reuses `ContinuousWorld` + `DQNAgent`).
 
 Backlog:
 - [ ] `engine/obstacles.py` — procedural layout generation (count range, spacing, start/goal safe zones), circle-collision check, K-nearest-within-`L` + sentinel padding
@@ -316,13 +567,15 @@ Backlog:
 **Definition of Done**: generated layouts always respect count/spacing/safe-zone constraints;
 observation vector has the right shape and correct padding when fewer than K obstacles are in
 range; unit tests pass.
-**Out of scope**: training/Room 6 page wiring, the random-room generalization button (Sprint 9).
+**Out of scope**: training/Room 6 page wiring, the random-room generalization button (Sprint 8).
 
 ---
 
-## Sprint 9 — Room 6b: training, generalization test & polish
-**Goal**: finish Room 6 end-to-end, including the spec's explicit post-training generalization test.
-**Depends on**: Sprint 8.
+## Sprint 8 — Room 6b: training, generalization test & polish
+**Goal**: finish Room 6 end-to-end, including the spec's explicit post-training generalization
+test. This completes the mandatory room arc (1, 3, 4, 5, 6) — Room 2 (Monte Carlo) is next,
+since it's the one optional room.
+**Depends on**: Sprint 7.
 
 Backlog:
 - [ ] `pages/6_room6_dynamic_obstacles.py` — full sidebar/Info/Train/Board
@@ -338,9 +591,31 @@ a fresh layout and reports outcome + G.
 
 ---
 
+## Sprint 9 — Room 2: Monte Carlo (optional)
+**Goal**: the one non-mandatory room (plan.md §1) — first-visit MC control, reusing Sprint 2's
+Room 1 page pattern almost unchanged. Scheduled last among the content sprints, after the
+mandatory arc (Rooms 1, 3, 4, 5, 6) is fully done, so a time crunch drops this sprint rather than
+a required one.
+**Depends on**: Sprint 2 (shares `GridWorld`; otherwise independent of Sprints 3-8).
+
+Backlog:
+- [ ] `engine/monte_carlo_agent.py` — first-visit MC control, ε-greedy, exploring-starts toggle
+- [ ] `pages/2_room2_monte_carlo.py`
+- [ ] `docs/room2.md`
+- [ ] Train tab: reward/steps per episode, ε decay, visit-count heatmap
+- [ ] Board tab: policy/value heatmap, episode-checkpoint replay slider, escape attempt
+
+**Definition of Done**: same shape as Sprint 2's DoD, for Room 2; toggling exploring-starts
+visibly changes early-episode behavior.
+**Out of scope**: if there isn't time for this sprint, drop it and demote Monte Carlo to
+plan.md §6's stretch list rather than cutting scope from a mandatory room.
+
+---
+
 ## Sprint 10 — Final polish
 **Goal**: tie the six rooms together into the finished product.
-**Depends on**: Sprints 2-9 all done.
+**Depends on**: Sprints 2-9 all done (Sprint 9 may be skipped per its own Out of scope note,
+in which case the lobby simply shows Room 2 as untrained).
 
 Backlog:
 - [ ] Lobby page: real scoreboard reading every room's `history.json` for V(start), replacing

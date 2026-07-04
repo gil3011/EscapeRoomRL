@@ -152,11 +152,17 @@ requirement as something that grows with the project rather than being written o
 
 ### 3.3 Shared engine modules (used by multiple rooms)
 - **`grid_world.py` — `GridWorld`**: one configurable class for all four grid rooms (size,
-  start, goal, walls, slippery cells + slip probability, traps, step/goal/trap rewards).
+  start, goal, walls, slippery cells + slip probability, traps, optional shortcut-tile
+  teleports, step/goal/trap rewards).
   Gym-like API: `reset()`, `step(action) -> (state, reward, done, info)`. Also exposes
   `transition_model()` — `P(s'|s,a)` and `R(s,a,s')` — used **only** by Room 1's DP solver; Rooms
   2–4 only ever call `step()`, which is what makes the model "unknown" to them even though it's
   the same underlying class. One well-tested engine instead of four near-duplicates.
+- **`patrol_world.py` — `PatrolGridWorld(GridWorld)`**: Room 4 only. Augments the state to
+  `(agent_cell, patrol_phase)` and adds a deterministic moving enemy (failure-terminal on
+  contact), leaving the base `GridWorld` — and Rooms 1-3 — unchanged. The phase indexes the
+  enemy's position in its fixed patrol cycle, which is what restores the Markov property once a
+  hazard moves.
 - **`continuous_world.py` — `ContinuousWorld`**: 10×10 m room, position `(x, y)` continuous,
   velocity `(vx, vy) ∈ {-1, 0, 1}²` set directly by the chosen action (not acceleration), `dt =
   0.02 s`, boundary-clipped (no out-of-bounds failure). Room 6 subclasses it to add a static
@@ -235,23 +241,64 @@ G next to V for comparison).
 - **Board tab**: same heatmap/arrows + checkpoint replay + escape attempt as Room 1.
 
 ### Room 3 — The On-Policy Corridor (SARSA)
-- **Task**: same engine, slippery cells (slightly higher default slip probability than Room 2 —
-  difficulty nudges up with each room).
-- **Algorithm**: on-policy TD(0), ε-greedy behavior policy, α learning rate.
-- **Sidebar**: α (+ optional decay), γ, ε start/end + decay, episode count, max steps/episode,
-  grid regeneration.
+- **Task**: same `GridWorld` engine, unknown-model framing (the agent only ever calls
+  `step()`). Runs on its own **fixed, hand-designed 10×10 board** (`engine/boards.py`, same
+  convention as Room 1 — see SPRINTS.md Sprint 3), not a procedurally regenerated one: walls,
+  traps, and slippery cells laid out the same way Room 1's were, plus one new mechanic — a
+  **shortcut tile** that instantly relocates the agent to a different cell when stepped on
+  (whether by choice or by slip). This pulls the "shortcut tiles" idea out of the §6 stretch
+  list into this room's core scope, since it's a cheap way to give an unknown-model room
+  something genuinely new to discover through experience, not just a re-skinned Room 1. Reward
+  model matches Room 1 exactly: no step cost, fixed high goal reward — discounting alone shapes
+  V(s), same as every grid room going forward.
+- **Algorithm**: on-policy TD(0) (SARSA), ε-greedy behavior policy, α learning rate. On-policy
+  means the TD target bootstraps off the *actual next action the ε-greedy policy samples*
+  (`Q(s,a) ← Q(s,a) + α[r + γQ(s',a') − Q(s,a)]`), not the best possible one — contrasted
+  explicitly with Room 4's off-policy `max` update once that room's docs are written.
+- **Sidebar**: slip probability, trap reward (board structure and goal reward are fixed, same
+  as Room 1 — no grid-regeneration control), α (+ optional decay), γ, ε start/end + decay,
+  episode count, max steps/episode.
 - **Train tab**: reward & steps per episode, mean |TD-error| per episode, ε/α curves.
-- **Board tab**: Q-derived policy/value heatmap + arrows, checkpoint replay, escape attempt.
+- **Board tab**: Q-derived policy/value heatmap + arrows (the shortcut tile drawn as its own
+  marker with a line to its destination cell), checkpoint replay, escape attempt.
 
 ### Room 4 — The Off-Policy Cellar (Q-Learning)
-- **Task**: same engine. The spec doesn't call out extra grid features for this room, so it
-  stays structurally identical to Rooms 2–3 — the difficulty step comes from the algorithm
-  change (off-policy max-update vs. on-policy), called out explicitly in the Info tab with a
-  side-by-side comparison to Room 3's SARSA update rule.
-- **Algorithm**: off-policy TD(0) (`max` over next-state actions).
-- **Sidebar**: same shape as Room 3 (α, γ, ε schedule, episode count, max steps/episode, grid
-  regeneration), plus the Phase-2 dynamic-extras toggles described in §6 once those exist.
-- **Train/Board tabs**: same pattern as Room 3.
+- **Task**: same `GridWorld` family, unknown-model, on its own **fixed board** — but the hardest
+  grid room, with two mechanics Rooms 1-3 didn't have: a **moving patrol enemy** and a **trap
+  door**. Walls, non-terminal traps, and slippery cells carry over from Room 3 (slip stays 0.25).
+- **Moving patrol enemy** (headline difficulty): a hazard that **moves one cell along a fixed
+  ping-pong patrol every step**. Colliding with it is a **failure-terminal state** (`enemy_reward`,
+  a large penalty) — the first room where you can *lose*, not just time out. Because the enemy
+  moves, the agent's cell alone is no longer a Markov state (the same cell is safe or deadly
+  depending on where the patroller is), so Room 4's state is augmented to
+  **`(agent_cell, patrol_phase)`**, where `patrol_phase` indexes the enemy's deterministic
+  position in its cycle. That expansion is itself the room's second lesson — *a dynamic hazard
+  forces you to grow the state* — and it takes the tabular problem from ~85 states to ~85·P
+  (still small; P = patrol period). Implemented as `PatrolGridWorld(GridWorld)` in
+  `engine/patrol_world.py`, leaving Rooms 1-3 untouched.
+- **Trap door** (from §6): a **bad teleport** — a cell that, when stepped on (by choice or via
+  slip), relocates the agent *backward* toward the start. Reuses Room 3's `shortcuts` engine, but
+  the destination sets you back instead of ahead; it looks like it sits on a fast route and has to
+  be learned-around. Flagged as a trap door (via a `trap_door_sources` set on the grid) so the
+  shared renderer draws it in a warning color, distinct from Room 3's teal helpful shortcut.
+- **Reward model**: same as Rooms 1/3 — no step cost, fixed high goal reward, discounting shapes
+  V(s) — plus the terminal `enemy_reward` on collision. Non-terminal traps still cost `trap_reward`.
+- **Algorithm**: off-policy TD(0) Q-learning: `Q(s,a) ← Q(s,a) + α[r + γ·max_a' Q(s',a') −
+  Q(s,a)]`. The `max` over next actions (vs. Room 3's *sampled* `a'`) is the entire on/off-policy
+  difference — and here it finally has a visible payoff: against the patrol, Q-learning learns the
+  optimal, tightly-timed route that cuts close to the enemy, whereas an on-policy learner (Room 3's
+  SARSA) would leave a safety buffer because its ε-greedy exploration risks stepping into the
+  patrol. The Info tab lays the two update rules side by side and points at this behavior.
+- **Sidebar**: Room 3's controls (slip, trap reward, α + decay, γ, ε schedule, episodes, max
+  steps/episode, snapshot interval, max attempt steps) plus `enemy_reward` (terminal collision
+  penalty). Board structure, goal reward, and the patrol path are fixed.
+- **Train tab**: Room 3's metrics (reward/steps/mean |TD-error|/ε) plus an **outcome breakdown**
+  per episode (escaped / caught / timed-out rate over training) — a cheap signal specific to this
+  room's new failure mode.
+- **Board tab**: Room 3's checkpoint-replay + escape-attempt, extended for the moving enemy — a
+  **patrol-phase slider** picks which enemy position to view the value heatmap/policy for (V now
+  depends on phase), and the escape replay **animates the enemy alongside the agent**, so you can
+  watch it time its run past the patrol. V(start) = `max_a Q((start, phase 0), a)`.
 
 ### Room 5 — The Open Floor (continuous state, DQN)
 - **Task**: `ContinuousWorld`, 10×10 m, start corner, single 1×1 m goal zone in the far corner.
@@ -322,11 +369,13 @@ Optional, off-by-default toggles, available across the grid rooms (1–4) and no
 ships with traps and wall barriers as core, static-board features (see §4) — they're listed here
 only in case Rooms 2-4 want *additional* or *randomized* versions of the same idea:
 - **Bonus tiles**: a one-time pickup reward at a fixed or random cell.
-- **Shortcut tiles**: teleport to another cell (a cheap way to create an interesting non-obvious
-  optimal path).
-- **Simple patrol enemy**: one cell that moves back and forth on a fixed path; touching it ends
-  the episode in a penalty like a trap, but it moves — a small step toward genuinely dynamic
-  hazards without building full multi-agent logic.
+- ~~Shortcut tiles~~ — pulled forward into Room 3's core scope instead of staying a stretch idea
+  (see §4, Room 3): a tile that teleports the agent elsewhere, cheap to build and a good fit for
+  a fixed board.
+- ~~Simple patrol enemy~~ — pulled forward into Room 4's core scope (see §4, Room 4): a cell that
+  ping-pongs on a fixed path, terminal-on-contact, with the state augmented to include its phase.
+- ~~Bad-teleport "trap door"~~ — also pulled into Room 4 core (a shortcut whose destination sets
+  the agent back toward the start).
 - **Moving obstacles in Room 6**: upgrade the static-per-episode obstacles to drift during the
   episode, once the static version is trained and validated.
 

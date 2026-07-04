@@ -51,11 +51,26 @@ def render_grid(grid, values: dict | None = None, policy: dict | None = None,
     si, sj = grid.start
     fig.add_annotation(x=sj, y=si, text="●", showarrow=False, font=dict(size=14, color="#7c3aed"))
 
+    # shortcut tiles (Room 3): stepping onto a source teleports to its destination.
+    # Drawn in teal — a hue no other marker uses — with a dashed line linking the two
+    # so the mechanic reads at a glance. The agent never rests on a source cell.
+    shortcuts = getattr(grid, "shortcuts", None) or {}
+    for (si_, sj_), (di_, dj_) in shortcuts.items():
+        fig.add_trace(go.Scatter(x=[sj_, dj_], y=[si_, di_], mode="lines",
+                                 line=dict(color="rgba(13,148,136,0.7)", width=2, dash="dot"),
+                                 showlegend=False, hoverinfo="skip"))
+        cell_rect(si_, sj_, "rgba(13,148,136,0.30)")
+        cell_rect(di_, dj_, "rgba(13,148,136,0.15)")
+        fig.add_annotation(x=sj_, y=si_, text="🌀", showarrow=False, font=dict(size=18))
+        fig.add_annotation(x=dj_, y=di_, text="◎", showarrow=False,
+                           font=dict(size=18, color="#0d9488"))
+
     if policy:
         # traps aren't terminal, so the policy still recommends a move from one —
-        # only the goal itself has no action to show.
+        # only the goal itself has no action to show. Shortcut sources are skipped too:
+        # the agent never rests on one, and the 🌀 marker reads cleaner without an arrow.
         for (i, j), a in policy.items():
-            if (i, j) == grid.goal:
+            if (i, j) == grid.goal or (i, j) in shortcuts:
                 continue
             fig.add_annotation(x=j, y=i, text=ACTION_ARROWS[a], showarrow=False,
                                font=dict(size=16, color="#111827"))

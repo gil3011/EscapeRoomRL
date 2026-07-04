@@ -98,4 +98,44 @@
   (`test_slip_never_bumps_a_wall_when_a_legal_alternative_exists`,
   `test_slip_with_no_legal_alternative_keeps_the_intended_action`,
   `test_transition_model_slip_outcomes_exclude_wall_bumps`); full suite is 28/28 passing.
-- Next: **Sprint 3** — Room 2 (Monte Carlo).
+- Sprints re-ordered: Room 2 (Monte Carlo) is the one non-mandatory room (plan.md §1) and has
+  been moved to Sprint 9, after the mandatory arc (Rooms 1, 3, 4, 5, 6) — see SPRINTS.md's
+  reordering note.
+
+## Sprint 3 — Room 3: SARSA ✅
+- **Design decisions (locked with the user)**: Room 3 gets a fixed, hand-designed board like
+  Room 1 (not procedural); the same reward model as Room 1 (no step cost, fixed high goal
+  reward); the same hazard mix (walls/traps/slippery) **plus a new shortcut tile** — pulled
+  forward from plan.md §6's stretch list into core scope.
+- `engine/grid_world.py` — added an optional `shortcuts: dict[cell, cell]` field. Landing on a
+  shortcut source (by choice **or** via slip) teleports the agent to its destination; handled in
+  `_move()`, so `step()`, `transition_model()`, `_outcomes()`, and slip's legal-alternative draw
+  all pick it up for free. Default empty, so Room 1 is unaffected. Also exposed a public
+  `legal_actions()` accessor (thin wrapper over `_legal_actions`) for the model-free rooms.
+- `engine/boards.py` — Room 3's static board: 13 walls in scattered clusters (different seed
+  from Room 1), 3 non-terminal traps, 10 slippery cells, and a `(5,1)→(5,8)` shortcut. Validated
+  (no overlaps, goal reachable, no isolated pockets, destination is a plain cell); the shortcut
+  cuts the fastest solve from 18 steps to 11. Default `slip_prob` nudged to 0.25 (difficulty step
+  after Room 1). Goal reward fixed at 100, matching Room 1 so V(start) stays comparable.
+- `engine/sarsa_agent.py` — on-policy TD(0): Q-table, ε-greedy behaviour policy that bootstraps
+  off the *sampled* next action `a'` (not the greedy max — the line that will differ from Room 4).
+  ε (and optional α) linear decay, per-episode metrics (reward/steps/mean |TD-error|/ε/α),
+  checkpoints every N episodes (policy + Q-derived values + a greedy rollout). With no step cost,
+  the behaviour policy is restricted to legal (position-changing) moves — documented as a modeling
+  choice that keeps the greedy policy from ever showing a wall-bump arrow, same as Room 1.
+- `pages/3_room3_sarsa.py` — unlike Room 1's instant DP solve, this room trains on the shared
+  `TrainingRunner` background thread and streams metrics over its queue; the page drains the queue
+  each rerun and self-reruns (~0.4 s) while training, then persists on the final result. Controls
+  grouped env/SARSA/exploration; Info/Train/Board tabs mirror Room 1 (checkpoint-replay slider +
+  escape attempt reporting G next to V). Reloads the last run from disk on a cold start.
+- `ui/grid_render.py` — draws shortcut tiles in teal (🌀 source → ◎ destination) with a dashed
+  connecting line; skips a policy arrow on the source cell (the agent never rests there).
+- `docs/room3.md` — known-vs-unknown framing vs. Room 1, the SARSA update rule with "on-policy"
+  explained, the shortcut mechanic, the V-vs-G scoring convention, full parameter glossary.
+- **Verified**: `pytest` 41/41 (added shortcut, Room 3 board, and SARSA-agent tests); an AppTest
+  smoke run trained → viewed Train/Board tabs → ran an escape attempt with zero exceptions and a
+  clean `history.json` persistence round-trip. At the default config (3000 episodes, slip 0.25)
+  the greedy policy escapes on 100% of 300 stochastic rollouts, averaging 11 steps (the
+  shortcut-optimal path), using the shortcut 100% of the time, with V(start) ≈ 32 (≈ γ¹¹·100).
+- Next: **Sprint 4** — Room 4 (Q-Learning); Info tab contrasts off-policy `max` update vs. Room 3's
+  on-policy SARSA, reusing this room's page/agent structure.

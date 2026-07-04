@@ -88,6 +88,42 @@ def test_transition_model_slip_outcomes_exclude_wall_bumps():
     assert abs(sum(p for p, *_ in outcomes) - 1.0) < 1e-9
 
 
+def test_step_onto_shortcut_relocates_to_destination():
+    # from (0,0), RIGHT lands on (0,1), a shortcut whose destination is (2,0) --
+    # the agent should end up at the destination, never resting on the source.
+    g = GridWorld(size=3, start=(0, 0), goal=(2, 2), shortcuts={(0, 1): (2, 0)},
+                  slip_prob=0.0)
+    g.reset()
+    state, _, _, _ = g.step(RIGHT)
+    assert state == (2, 0)
+
+
+def test_slip_onto_shortcut_relocates_to_destination():
+    # at (1,1): UP is intended; DOWN and LEFT bump walls, so RIGHT->(1,2) is the only
+    # legal slip alternative. (1,2) is a shortcut to (0,0), so every slip teleports there.
+    g = GridWorld(size=3, start=(1, 1), goal=(2, 2),
+                  walls=frozenset({(2, 1), (1, 0)}),
+                  slippery=frozenset({(1, 1)}),
+                  shortcuts={(1, 2): (0, 0)},
+                  slip_prob=1.0, seed=0)
+    outcomes = set()
+    for _ in range(20):
+        g.reset()
+        state, _, _, _ = g.step(UP)
+        outcomes.add(state)
+    assert outcomes == {(0, 0)}
+
+
+def test_transition_model_reflects_shortcut_teleport():
+    # from (0,0), RIGHT would land on (0,1), a shortcut to (1,1). The model's outcome
+    # for ((0,0), RIGHT) must show the destination, not the source cell.
+    g = GridWorld(size=3, start=(0, 0), goal=(2, 2), shortcuts={(0, 1): (1, 1)},
+                  slip_prob=0.0)
+    model = g.transition_model()
+    next_states = {s2 for _p, s2, _r, _d in model[((0, 0), RIGHT)]}
+    assert next_states == {(1, 1)}
+
+
 def test_transition_model_probabilities_sum_to_one():
     g = GridWorld(size=4, start=(0, 0), goal=(3, 3), slippery=frozenset({(1, 1)}), slip_prob=0.2)
     model = g.transition_model()
