@@ -76,3 +76,47 @@ def test_slip_still_fires_and_phase_advances_regardless():
     state, _r, _d, _i = g.step(UP)  # intended UP->(0,1), but slip forces another legal dir
     assert state[0] != (0, 1)       # slipped somewhere else
     assert state[1] == 1            # enemy phase advances no matter what the agent did
+
+
+def test_random_enemy_phase_indexes_distinct_patrol_cells():
+    # ping-pong path with duplicates -> random mode collapses to the 4 distinct cells
+    g = PatrolGridWorld(size=8, start=(0, 0), goal=(7, 7), random_enemy=True,
+                        patrol_path=[(3, 5), (4, 5), (5, 5), (6, 5), (5, 5), (4, 5)])
+    assert g.period == 4
+    assert [g.enemy_cell(p) for p in range(4)] == [(3, 5), (4, 5), (5, 5), (6, 5)]
+
+
+def test_random_enemy_only_stays_or_steps_to_an_adjacent_patrol_cell():
+    g = PatrolGridWorld(size=8, start=(0, 0), goal=(7, 7), random_enemy=True, seed=1,
+                        patrol_path=[(3, 5), (4, 5), (5, 5), (6, 5)])
+    g.reset()
+    seen_positions = set()
+    prev = g.enemy_cell(g.state[1])
+    for _ in range(200):
+        if g.is_terminal(g.state):
+            g.reset()
+            prev = g.enemy_cell(g.state[1])
+            continue
+        _s, _r, _d, _i = g.step(DOWN)
+        cur = g.enemy_cell(g.state[1])
+        seen_positions.add(cur)
+        # each enemy step is a stay or a one-cell move along the patrol line
+        assert abs(cur[0] - prev[0]) + abs(cur[1] - prev[1]) <= 1
+        prev = cur
+    # over many steps the random walk visits more than one cell (it isn't stuck)
+    assert len(seen_positions) > 1
+
+
+def test_random_enemy_is_reproducible_under_a_seed():
+    def run(seed):
+        g = PatrolGridWorld(size=8, start=(0, 0), goal=(7, 7), random_enemy=True, seed=seed,
+                            patrol_path=[(3, 5), (4, 5), (5, 5), (6, 5)])
+        g.reset()
+        phases = []
+        for _ in range(30):
+            if g.is_terminal(g.state):
+                break
+            g.step(DOWN)
+            phases.append(g.state[1])
+        return phases
+    assert run(7) == run(7)

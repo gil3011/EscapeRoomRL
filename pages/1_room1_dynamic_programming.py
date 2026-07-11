@@ -30,8 +30,7 @@ max_iterations = 150  # fixed — not user-adjustable
 env_col, dp_col, attempt_col = st.columns(3)
 with env_col:
     slip_prob = st.slider("Slip probability", 0.0, 0.9, 0.2, 0.05)
-    trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0,
-                             help="Stepping on a trap costs this much, but doesn't end the episode.")
+    trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0)
 
 with dp_col:
     method = st.radio("Method", ["Value Iteration", "Policy Iteration"])
@@ -40,16 +39,9 @@ with dp_col:
 with attempt_col:
     max_attempt_steps = st.slider("Max attempt steps", 20, 300, 150, 10)
 
-col1, col2 = st.columns(2)
-solve_clicked = col1.button("▶ Solve", use_container_width=True)
-reset_clicked = col2.button("🔄 Reset", use_container_width=True)
+solve_clicked = st.button("▶ Solve", use_container_width=True)
 
 st.divider()
-
-if reset_clicked:
-    for key, value in defaults.items():
-        st.session_state[f"{ROOM_ID}_{key}"] = value
-    st.rerun()
 
 if solve_clicked:
     grid = make_room1_grid(slip_prob=slip_prob, trap_reward=trap_reward)

@@ -5,7 +5,7 @@ from engine.boards import (
     ROOM3_GOAL, ROOM3_SHORTCUT_DST, ROOM3_SHORTCUT_SRC, ROOM3_SIZE, ROOM3_SLIPPERY,
     ROOM3_START, ROOM3_TRAPS, ROOM3_WALLS,
     ROOM4_GOAL, ROOM4_PATROL_PATH, ROOM4_SIZE, ROOM4_SLIPPERY, ROOM4_START,
-    ROOM4_TRAPDOOR_DST, ROOM4_TRAPDOOR_SRC, ROOM4_TRAPS, ROOM4_WALLS,
+    ROOM4_TRAPS, ROOM4_WALLS,
     make_room1_grid, make_room3_grid, make_room4_grid,
 )
 from engine.grid_world import ACTION_DELTAS
@@ -164,7 +164,7 @@ def _timed_solve(start, goal, walls, size, shortcuts, patrol_path):
 
 def test_room4_no_overlap_between_special_cells():
     groups = [ROOM4_WALLS, ROOM4_TRAPS, ROOM4_SLIPPERY, set(ROOM4_PATROL_PATH),
-              {ROOM4_TRAPDOOR_SRC}, {ROOM4_TRAPDOOR_DST}, {ROOM4_START}, {ROOM4_GOAL}]
+              {ROOM4_START}, {ROOM4_GOAL}]
     seen = set()
     for group in groups:
         overlap = seen & set(group)
@@ -184,19 +184,9 @@ def test_room4_goal_reachable_and_no_isolated_pockets():
     assert reachable == all_open
 
 
-def test_room4_trapdoor_destination_is_a_plain_backward_cell():
-    dst = ROOM4_TRAPDOOR_DST
-    assert dst not in ROOM4_WALLS
-    assert dst not in ROOM4_TRAPS
-    assert dst not in ROOM4_SLIPPERY
-    assert dst not in ROOM4_PATROL_PATH
-    assert dst not in (ROOM4_START, ROOM4_GOAL, ROOM4_TRAPDOOR_SRC)
-    assert sum(dst) < sum(ROOM4_TRAPDOOR_SRC), "trap door should send the agent backward"
-
-
 def test_room4_is_solvable_with_correct_timing():
     d = _timed_solve(ROOM4_START, ROOM4_GOAL, ROOM4_WALLS, ROOM4_SIZE,
-                     {ROOM4_TRAPDOOR_SRC: ROOM4_TRAPDOOR_DST}, list(ROOM4_PATROL_PATH))
+                     {}, list(ROOM4_PATROL_PATH))
     assert d is not None, "no timed path threads the patrol — board is unsolvable"
     assert d >= 18
 
@@ -204,7 +194,8 @@ def test_room4_is_solvable_with_correct_timing():
 def test_room4_factory_builds_a_consistent_patrol_grid():
     grid = make_room4_grid()
     assert grid.reset() == ((0, 0), 0)
+    # deterministic ping-pong: the phase indexes the full out-and-back cycle
     assert grid.period == len(ROOM4_PATROL_PATH)
-    # the barrier gap: crossing column 5 is only possible at rows 3-6
+    # the barrier gap: crossing column 5 is only possible at rows 2-6
     open_col5 = [i for i in range(ROOM4_SIZE) if (i, 5) not in ROOM4_WALLS]
-    assert open_col5 == [3, 4, 5, 6]
+    assert open_col5 == [2, 3, 4, 5, 6]

@@ -67,9 +67,11 @@ def train_sarsa(grid, *, episodes: int, gamma: float = 0.9, alpha: float = 0.2,
                 emit=None, stop_flag_ref=None) -> dict:
     """Train SARSA on `grid` and return a result dict:
         {history, checkpoints, Q, policy, values, v_start, episodes_run}
-    where history holds per-episode {reward, steps, td_error, epsilon, alpha} lists and
-    checkpoints is a list of {episode, policy, values, trajectory, success} taken every
-    `snapshot_interval` episodes for the Board tab's replay slider.
+    where history holds per-episode {reward, steps, td_error, epsilon, alpha, outcome}
+    lists (outcome is "goal" / "trap" / "timeout", or whatever step()'s info reports, so
+    the Train tab can count escapes vs. failures) and checkpoints is a list of
+    {episode, policy, values, trajectory, success} taken every `snapshot_interval`
+    episodes for the Board tab's replay slider.
 
     If `emit` is given (the TrainingRunner queue callback) it is called with
     ("metrics", {history, checkpoints}) at each snapshot and ("result", result) at the
@@ -82,7 +84,7 @@ def train_sarsa(grid, *, episodes: int, gamma: float = 0.9, alpha: float = 0.2,
     legal_actions = {s: grid.legal_actions(s) for s in states if not grid.is_terminal(s)}
 
     history: dict[str, list] = {"reward": [], "steps": [], "td_error": [],
-                                "epsilon": [], "alpha": []}
+                                "epsilon": [], "alpha": [], "outcome": []}
     checkpoints: list[dict] = []
     alpha_end = alpha * 0.1  # when decay_alpha is on, α ramps down to a tenth
 
@@ -105,14 +107,19 @@ def train_sarsa(grid, *, episodes: int, gamma: float = 0.9, alpha: float = 0.2,
         ep_reward = 0.0
         td_sum = 0.0
         steps = 0
+        outcome = "timeout"  # overwritten below if the episode terminates
         for _ in range(max_steps):
-            s2, r, done, _info = grid.step(a)
+            s2, r, done, info = grid.step(a)
             steps += 1
             ep_reward += r
             if done:
                 td = r - Q[s][a]  # terminal: no bootstrap, Q(terminal, .) = 0
                 Q[s][a] += lr * td
                 td_sum += abs(td)
+                # goal reached is the only success; any other terminal (a deadly trap, or
+                # an enemy in a room that has one) is a failure. Fall back to "trap" for
+                # plain grids, whose step() reports no outcome.
+                outcome = "goal" if grid.is_goal(s2) else info.get("outcome", "trap")
                 break
             a2 = _epsilon_greedy(Q[s2], legal_actions[s2], eps, rng)
             td = r + gamma * Q[s2][a2] - Q[s][a]
@@ -125,6 +132,7 @@ def train_sarsa(grid, *, episodes: int, gamma: float = 0.9, alpha: float = 0.2,
         history["td_error"].append(td_sum / steps if steps else 0.0)
         history["epsilon"].append(eps)
         history["alpha"].append(lr)
+        history["outcome"].append(outcome)
 
         if snapshot_interval and (ep + 1) % snapshot_interval == 0:
             snapshot(ep + 1)
