@@ -40,6 +40,10 @@ class GridWorld:
     step_reward: float = -0.04
     goal_reward: float = 1.0
     trap_reward: float = -1.0
+    # when True, stepping on a trap ends the episode in failure (a non-goal terminal)
+    # instead of merely costing trap_reward and continuing. Off by default so Room 1 and
+    # any room that wants survivable traps is unaffected; Room 3 exposes it as a toggle.
+    deadly_traps: bool = False
     seed: int | None = None
 
     def __post_init__(self) -> None:
@@ -57,7 +61,7 @@ class GridWorld:
         return self.start
 
     def is_terminal(self, state: tuple[int, int]) -> bool:
-        return state == self.goal
+        return state == self.goal or (self.deadly_traps and state in self.traps)
 
     def is_goal(self, state) -> bool:
         """Whether `state` is the success-terminal goal. Split out from is_terminal so
@@ -161,7 +165,8 @@ class GridWorld:
         if state == self.goal:
             return self.goal_reward, True
         if state in self.traps:
-            return self.trap_reward, False  # costly, but not terminal
+            # costly always; terminal (a failure) only when the room enables deadly traps
+            return self.trap_reward, self.deadly_traps
         return self.step_reward, False
 
 

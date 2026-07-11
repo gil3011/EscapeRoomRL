@@ -44,87 +44,82 @@ def make_room1_grid(slip_prob: float = 0.2, trap_reward: float = -20.0) -> GridW
     )
 
 
-# --- Room 3 (SARSA) -------------------------------------------------------------
-# Same fixed-board convention as Room 1, a different layout, plus one new mechanic:
-# a shortcut tile. The wall clusters bow the natural route around the middle of the
-# board; stepping onto the shortcut source (5,1) teleports the agent to (5,8), on the
-# far side near the goal — cutting the shortest solve from 18 steps to 11 (validated:
-# no overlaps, goal reachable, no isolated pockets, destination is a plain cell). Same
+# --- Shared board for Rooms 3 (SARSA) and 4 (Q-learning) ------------------------
+# The two rooms run on the SAME terrain, so the only things that differ between them are
+# the algorithm (on-policy SARSA vs off-policy Q-learning) and each room's own mechanic —
+# Room 3's shortcut tile, Room 4's patrol enemy. The layout is authored around Room 4's
+# needs: a wall barrier down column 5 with a rows 2-6 gap that the patrol guards. Same
 # reward convention as Room 1: no step cost, fixed high goal reward, tunable trap cost.
-ROOM3_SIZE = 10
-ROOM3_START = (0, 0)
-ROOM3_GOAL = (9, 9)
+GRID34_SIZE = 10
+GRID34_START = (0, 0)
+GRID34_GOAL = (9, 9)
+GRID34_WALLS = frozenset({
+    (0, 5), (1, 5), (7, 5), (8, 5), (9, 5),  # the barrier, with a rows 2-6 gap
+    (2, 2), (2, 3),
+    (6, 2), (7, 2),
+    (4, 8), (5, 8),
+})
+GRID34_TRAPS = frozenset({(3, 7), (6, 3), (1, 8)})
+GRID34_SLIPPERY = frozenset({
+    (1, 1), (8, 1), (1, 6), (8, 7),
+    (3, 1), (9, 2), (2, 9), (7, 8),
+})
 
-ROOM3_WALLS = frozenset({
-    (1, 3), (2, 3), (2, 4),
-    (4, 1), (4, 2),
-    (3, 6), (4, 6), (4, 7),
-    (6, 4), (7, 4), (7, 5),
-    (8, 8), (9, 7),
-})
-ROOM3_TRAPS = frozenset({(2, 6), (6, 7), (8, 2)})
-ROOM3_SLIPPERY = frozenset({
-    (1, 1), (1, 6), (3, 3), (3, 8), (5, 2),
-    (5, 5), (6, 1), (7, 8), (8, 5), (9, 3),
-})
+
+# --- Room 3 (SARSA) -------------------------------------------------------------
+# The shared board above plus one mechanic of its own: a shortcut tile (and no patrol).
+# Stepping onto the shortcut source (5,1) teleports the agent to (7,7), on the far side
+# of the barrier near the goal — cutting the shortest solve from 18 steps to 10
+# (validated: no overlaps, destination is a plain cell, teleport shortens without
+# trivializing). Same reward convention as Room 1.
+ROOM3_SIZE = GRID34_SIZE
+ROOM3_START = GRID34_START
+ROOM3_GOAL = GRID34_GOAL
+ROOM3_WALLS = GRID34_WALLS
+ROOM3_TRAPS = GRID34_TRAPS
+ROOM3_SLIPPERY = GRID34_SLIPPERY
 # one (source -> destination) teleport pair; source is a plain cell the agent never
 # rests on (it's relocated on arrival), destination is a plain open cell near the goal.
 ROOM3_SHORTCUT_SRC = (5, 1)
-ROOM3_SHORTCUT_DST = (5, 8)
+ROOM3_SHORTCUT_DST = (7, 7)
 ROOM3_SHORTCUTS = {ROOM3_SHORTCUT_SRC: ROOM3_SHORTCUT_DST}
 
 # Fixed, matching Room 1, so V(start) stays on a comparable scale across the lobby.
 ROOM3_GOAL_REWARD = 100.0
 
 
-def make_room3_grid(slip_prob: float = 0.25, trap_reward: float = -20.0) -> GridWorld:
-    """Room 3's fixed board. Same reward convention as Room 1 (no step cost, fixed
-    goal reward), plus the shortcut-tile teleport. Default slip_prob is nudged up to
-    0.25 — Room 3 is the difficulty step right after Room 1."""
+def make_room3_grid(slip_prob: float = 0.25, trap_reward: float = -20.0,
+                    deadly_traps: bool = False) -> GridWorld:
+    """Room 3's board — the same terrain as Room 4 (minus the patrol and trap door),
+    plus the shortcut-tile teleport. Same reward convention as Room 1 (no step cost,
+    fixed goal reward); default slip_prob is nudged up to 0.25. With `deadly_traps` on,
+    the trap tiles end the episode in failure instead of merely costing reward."""
     return GridWorld(
         size=ROOM3_SIZE, start=ROOM3_START, goal=ROOM3_GOAL,
         walls=ROOM3_WALLS, traps=ROOM3_TRAPS, slippery=ROOM3_SLIPPERY,
         shortcuts=dict(ROOM3_SHORTCUTS),
         slip_prob=slip_prob, step_reward=0.0,
-        goal_reward=ROOM3_GOAL_REWARD, trap_reward=trap_reward,
+        goal_reward=ROOM3_GOAL_REWARD, trap_reward=trap_reward, deadly_traps=deadly_traps,
     )
 
 
 # --- Room 4 (Q-learning) --------------------------------------------------------
-# The hardest grid room: Room 3's mix (walls/traps/slippery) plus two new mechanics —
-# a moving patrol enemy and a trap door. A vertical wall barrier at column 5 leaves a
-# 4-row gap (rows 3-6) that every crossing must pass through; the enemy ping-pongs up
-# and down that gap, so the crossing has to be *timed*. The trap door (6,6)->(1,2) is a
-# tempting cell just past the chokepoint that flings the agent back near the start.
-# Validated (no overlaps; enemy never on start/goal; goal reachable; trap-door dst is a
-# plain backward cell; shortest timed solve over (cell,phase) space is 18 steps).
-ROOM4_SIZE = 10
-ROOM4_START = (0, 0)
-ROOM4_GOAL = (9, 9)
+# The hardest grid room: the shared board above plus one new mechanic — a moving patrol
+# enemy. The vertical wall barrier at column 5 leaves a 5-row gap (rows 2-6) that every
+# crossing must pass through; the enemy ping-pongs deterministically up and down that gap,
+# so the crossing has to be *timed*. Validated (no overlaps; enemy never on start/goal;
+# goal reachable; shortest timed solve over (cell,phase) space is 18 steps).
+ROOM4_SIZE = GRID34_SIZE
+ROOM4_START = GRID34_START
+ROOM4_GOAL = GRID34_GOAL
+ROOM4_WALLS = GRID34_WALLS
+ROOM4_TRAPS = GRID34_TRAPS
+ROOM4_SLIPPERY = GRID34_SLIPPERY
 
-ROOM4_WALLS = frozenset({
-    (0, 5), (1, 5), (2, 5), (7, 5), (8, 5), (9, 5),  # the barrier, with a rows 3-6 gap
-    (2, 2), (2, 3),
-    (6, 2), (7, 2),
-    (4, 8), (5, 8),
-})
-ROOM4_TRAPS = frozenset({(3, 7), (6, 3), (1, 8)})
-# kept away from the crossing zone so the on/off-policy behaviour gap near the patrol is
-# driven by ε-exploration risk, not by slip noise.
-ROOM4_SLIPPERY = frozenset({
-    (1, 1), (8, 1), (1, 6), (8, 7),
-    (3, 1), (9, 2), (2, 9), (7, 8),
-})
-
-# ping-pong patrol up and down the gap in column 5. Stored as the full cycle, so
-# period = len(path) and enemy_cell(phase) = path[phase].
-_ROOM4_PATROL_SEG = [(3, 5), (4, 5), (5, 5), (6, 5)]
+# ping-pong patrol up and down the five gap cells in column 5. Stored as the full cycle
+# (out and back), so period = len(path) and enemy_cell(phase) = path[phase].
+_ROOM4_PATROL_SEG = [(2, 5), (3, 5), (4, 5), (5, 5), (6, 5)]
 ROOM4_PATROL_PATH = _ROOM4_PATROL_SEG[:-1] + _ROOM4_PATROL_SEG[:0:-1]
-
-# trap door: a bad teleport (source listed in trap_door_sources so it renders as a hazard)
-ROOM4_TRAPDOOR_SRC = (6, 6)
-ROOM4_TRAPDOOR_DST = (1, 2)
-ROOM4_SHORTCUTS = {ROOM4_TRAPDOOR_SRC: ROOM4_TRAPDOOR_DST}
 
 ROOM4_GOAL_REWARD = 100.0    # fixed, matching the family, so V(start) stays comparable
 ROOM4_ENEMY_REWARD = -100.0  # default terminal collision penalty (tunable in the sidebar)
@@ -132,13 +127,12 @@ ROOM4_ENEMY_REWARD = -100.0  # default terminal collision penalty (tunable in th
 
 def make_room4_grid(slip_prob: float = 0.25, trap_reward: float = -20.0,
                     enemy_reward: float = ROOM4_ENEMY_REWARD) -> PatrolGridWorld:
-    """Room 4's fixed board with the moving patrol enemy and trap door. Same reward
-    convention as Rooms 1/3 (no step cost, fixed goal reward), plus a terminal
-    enemy_reward on collision."""
+    """Room 4's fixed board with the deterministic ping-pong patrol enemy. Same reward
+    convention as Rooms 1/3 (no step cost, fixed goal reward), plus a terminal enemy_reward
+    on collision."""
     return PatrolGridWorld(
         size=ROOM4_SIZE, start=ROOM4_START, goal=ROOM4_GOAL,
         walls=ROOM4_WALLS, traps=ROOM4_TRAPS, slippery=ROOM4_SLIPPERY,
-        shortcuts=dict(ROOM4_SHORTCUTS), trap_door_sources=frozenset({ROOM4_TRAPDOOR_SRC}),
         patrol_path=list(ROOM4_PATROL_PATH), enemy_reward=enemy_reward,
         slip_prob=slip_prob, step_reward=0.0,
         goal_reward=ROOM4_GOAL_REWARD, trap_reward=trap_reward,

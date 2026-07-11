@@ -41,25 +41,31 @@ so it's simply left out, the same way Room 1's policy never walks into a wall.
 
 New to this room: one **shortcut tile**. Step onto it — on purpose, or because a slip
 pushed you there — and you're instantly relocated across the board to its paired
-destination (◎). Nothing tells the agent it exists; it's just another thing to learn from
-experience. On this board the shortcut cuts the fastest route from 18 steps down to 11,
-so a well-trained policy learns to steer *onto* the teleport, exactly the way it learns to
-route around the trap. Watch the checkpoint slider on the Board tab: early on the arrows
-ignore it, and later they funnel toward it.
+destination (◎), on the far side of the wall barrier near the goal. Nothing tells the
+agent it exists; it's just another thing to learn from experience. On this board the
+shortcut cuts the fastest route from 18 steps down to 10, so a well-trained policy learns
+to steer *onto* the teleport, exactly the way it learns to route around the trap. Watch
+the checkpoint slider on the Board tab: early on the arrows ignore it, and later they
+funnel toward it.
 
 ### Board features
 
 - **Walls** (dark): blocked cells; moving into one or off the edge is a no-op.
 - **Slippery cells** (blue): with probability `slip_prob`, a random *legal* direction is
   taken instead of the chosen one.
-- **Traps** (red): stepping here costs `trap_reward`, but doesn't end the episode.
+- **Traps** (red): stepping here costs `trap_reward`. By default the agent survives and
+  walks on; flip on **Deadly traps** and a trap instead ends the episode in *failure*.
 - **Shortcut** (teal 🌀 → ◎): stepping on the source teleports the agent to the destination.
-- **Goal** (green 🚪): the only terminal cell; stepping here ends the episode and pays out.
+- **Goal** (green 🚪): the success-terminal cell; stepping here ends the episode and pays out.
+
+With **Deadly traps** on, an episode ends one of three ways — escaped (reached the goal),
+died on a trap, or timed out — and the Train tab tallies how many episodes **succeeded**
+versus **failed**.
 
 The reward model matches Room 1 exactly: **no step cost**, a fixed high goal reward. With
 γ < 1, discounting alone makes closer-to-the-goal cells worth more (`V(s) ≈ γ^d · goal`),
 so a shorter escape is automatically a higher-value one — no artificial per-step penalty
-needed. That also keeps V(start) on the same scale as Room 1 for the lobby scoreboard.
+needed. That also keeps V(start) on the same scale as Rooms 1 and 4 for easy comparison.
 
 ### Scoring — V and G
 
@@ -74,7 +80,8 @@ needed. That also keeps V(start) on the same scale as Room 1 for the lobby score
 | Parameter | What it controls |
 |---|---|
 | Slip probability | Chance a slippery cell substitutes a random legal action |
-| Trap reward | Penalty for stepping on a trap (doesn't end the episode) |
+| Trap reward | Reward for stepping on a trap tile |
+| Deadly traps | If on, a trap ends the episode in failure instead of just costing its reward |
 | Learning rate α | How far each step nudges Q toward the new TD estimate |
 | Decay α | If on, α ramps down to a tenth over training (like ε) |
 | Gamma (γ) | Discount factor — how much a delayed reward is worth now |
@@ -82,7 +89,5 @@ needed. That also keeps V(start) on the same scale as Room 1 for the lobby score
 | Max steps / episode | Safety cap so an early random policy can't wander forever |
 | ε start / end | Exploration rate at the beginning and end of training |
 | ε decay fraction | Fraction of episodes over which ε linearly decays to ε end |
-| Snapshot interval | How often to checkpoint the policy for Board-tab replay |
-| Max attempt steps | Safety cap on a single escape-attempt rollout |
 
 Goal reward and the board layout are fixed and not adjustable.

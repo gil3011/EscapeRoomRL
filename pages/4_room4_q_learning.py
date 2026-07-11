@@ -1,10 +1,10 @@
 """Room 4 — Q-Learning. Off-policy TD(0) on the hardest grid board: a moving patrol
-enemy (state augmented to (agent_cell, phase)) and a trap door (bad teleport).
+enemy (state augmented to (agent_cell, phase)).
 
-Structurally the twin of Room 3 (SARSA) — same TrainingRunner wiring and tab layout —
-so the two rooms read as a matched pair. The only algorithmic difference is the update
-rule (max over next actions, not the sampled one); the visible difference is the moving
-enemy and the phase slider needed to view a value function that now depends on it.
+Structurally the twin of Room 3 (SARSA) — same board, same TrainingRunner wiring and tab
+layout — so the two rooms read as a matched pair. The only algorithmic difference is the
+update rule (max over next actions, not the sampled one); the visible difference is the
+moving enemy and the phase slider needed to view a value function that now depends on it.
 """
 from collections import deque
 from pathlib import Path
@@ -19,7 +19,7 @@ from engine.storage import load_checkpoint, load_history, save_checkpoint, save_
 from engine.training_runner import TrainingRunner
 from ui.charts import line_chart
 from ui.grid_render import render_grid
-from ui.sidebar_helpers import train_stop_reset
+from ui.sidebar_helpers import train_stop
 
 ROOM_ID = "room4"
 
@@ -125,14 +125,9 @@ with explore_col:
     snapshot_interval = st.slider("Snapshot interval", 10, 1000, 100, 10, disabled=training)
     max_attempt_steps = st.slider("Max attempt steps", 20, 300, 150, 10)
 
-start, stop, reset = train_stop_reset(training)
+start, stop = train_stop(training)
 
 st.divider()
-
-if reset and not training:
-    for key, value in defaults.items():
-        st.session_state[f"{ROOM_ID}_{key}"] = value
-    st.rerun()
 
 if start and not training:
     for key in ("history", "checkpoints", "policy", "values", "v_start",
@@ -210,6 +205,15 @@ with tab_train:
         c3.metric("V(start)", "—" if v_start is None else f"{v_start:.2f}",
                   help="max_a Q((start, phase 0), a) from the learned Q-table.")
 
+        if outcomes:
+            escaped = outcomes.count("goal")
+            failed = len(outcomes) - escaped
+            s1, s2 = st.columns(2)
+            s1.metric("✅ Succeeded (escaped)", f"{escaped:,}",
+                      help=f"{100 * escaped / len(outcomes):.1f}% of episodes reached the goal.")
+            s2.metric("❌ Failed", f"{failed:,}",
+                      help="Episodes caught by the patrol or timed out without escaping.")
+
         st.plotly_chart(line_chart(_rolling_rates(outcomes),
                                    title="Outcome breakdown (rolling %)"),
                         use_container_width=True)
@@ -240,7 +244,7 @@ with tab_board:
             idx = st.slider("Checkpoint", 0, len(checkpoints) - 1, len(checkpoints) - 1)
             phase = st.slider("Enemy phase", 0, grid.period - 1, 0,
                               help="The value function depends on where the patrol is — scrub to "
-                                   "see V and the policy for each enemy position.")
+                                   "see V and the policy for each enemy phase.")
             cp = checkpoints[idx]
             fig = render_grid(grid, values=_project(cp["values"], phase),
                               policy=_project(cp["policy"], phase),
@@ -273,6 +277,14 @@ with tab_board:
                                   enemy_pos=grid.enemy_cell(phase), patrol_path=grid.patrol_path,
                                   title="Escape attempt")
                 st.plotly_chart(fig, use_container_width=True)
+                st.info(
+                    f"ℹ️ The arrows and values shown are the policy **for this one enemy "
+                    f"position** (phase {phase}). Because the state is `(agent cell, enemy "
+                    f"position)`, the agent has a *different* map for each place the 👾 can "
+                    f"be — so the arrows redraw every time you step the slider and the enemy "
+                    f"moves. A cell can point one way when the enemy is near and another when "
+                    f"it's clear."
+                )
 
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Steps taken", st.session_state[f"{ROOM_ID}_attempt_steps"])

@@ -18,7 +18,7 @@ from engine.storage import load_checkpoint, load_history, save_checkpoint, save_
 from engine.training_runner import TrainingRunner
 from ui.charts import line_chart
 from ui.grid_render import render_grid
-from ui.sidebar_helpers import train_stop_reset
+from ui.sidebar_helpers import train_stop
 
 ROOM_ID = "room3"
 
@@ -38,7 +38,7 @@ runner: TrainingRunner = st.session_state.setdefault(f"{ROOM_ID}_runner", Traini
 def _train_fn(cfg, emit, stop_flag_ref):
     """Runs on the TrainingRunner thread. Builds the room's grid from the tunable
     env params, then hands off to the generic SARSA loop, which emits metrics/result."""
-    grid = make_room3_grid(cfg["slip_prob"], cfg["trap_reward"])
+    grid = make_room3_grid(cfg["slip_prob"], cfg["trap_reward"], cfg["deadly_traps"])
     train_sarsa(grid, emit=emit, stop_flag_ref=stop_flag_ref, **cfg["sarsa"])
 
 
@@ -60,7 +60,7 @@ if st.session_state[f"{ROOM_ID}_history"] is None and not st.session_state[f"{RO
     saved_cps = load_checkpoint(ROOM_ID, "snapshots")
     if saved and saved_cps:
         st.session_state[f"{ROOM_ID}_history"] = {
-            k: saved[k] for k in ("reward", "steps", "td_error", "epsilon", "alpha")
+            k: saved.get(k, []) for k in ("reward", "steps", "td_error", "epsilon", "alpha", "outcome")
         }
         st.session_state[f"{ROOM_ID}_checkpoints"] = saved_cps
         st.session_state[f"{ROOM_ID}_v_start"] = saved.get("v_start")
@@ -70,6 +70,7 @@ if st.session_state[f"{ROOM_ID}_history"] is None and not st.session_state[f"{RO
         st.session_state[f"{ROOM_ID}_env"] = {
             "slip_prob": saved.get("slip_prob", 0.25),
             "trap_reward": saved.get("trap_reward", -20.0),
+            "deadly_traps": saved.get("deadly_traps", False),
         }
 
 st.header("Room 3 controls")
@@ -80,7 +81,10 @@ with env_col:
     st.markdown("**Environment**")
     slip_prob = st.slider("Slip probability", 0.0, 0.9, 0.25, 0.05, disabled=training)
     trap_reward = st.slider("Trap reward", -100.0, -1.0, -20.0, 1.0, disabled=training,
-                            help="Stepping on a trap costs this much, but doesn't end the episode.")
+                            help="Reward for stepping on a trap tile.")
+    deadly_traps = st.toggle("Deadly traps", value=False, disabled=training,
+                             help="On: stepping on a trap ends the episode in failure. "
+                                  "Off: the trap only costs its reward and the agent walks on.")
     st.caption(f"Goal reward fixed at {ROOM3_GOAL_REWARD:.0f} (like Room 1). Board layout is fixed.")
 
 with algo_col:
@@ -94,22 +98,22 @@ with algo_col:
 
 with explore_col:
     st.markdown("**Exploration & replay**")
-    eps_start = st.slider("ε start", 0.0, 1.0, 1.0, 0.05, disabled=training)
-    eps_end = st.slider("ε end", 0.0, 0.5, 0.05, 0.01, disabled=training)
-    eps_decay_fraction = st.slider("ε decay fraction", 0.1, 1.0, 0.8, 0.05, disabled=training,
-                                   help="Fraction of episodes over which ε linearly decays to ε end.")
-    snapshot_interval = st.slider("Snapshot interval", 10, 500, 50, 10, disabled=training,
-                                  help="Save a checkpoint (Q-derived policy + a greedy rollout) every N episodes.")
-    max_attempt_steps = st.slider("Max attempt steps", 20, 300, 150, 10)
+    decay_epsilon = st.toggle("Decay ε over training", value=True, disabled=training,
+                              help="Linearly anneal ε from its start to its end value. "
+                                   "Off = a single fixed ε for the whole run.")
+    if decay_epsilon:
+        eps_start = st.slider("ε start", 0.0, 1.0, 1.0, 0.05, disabled=training)
+        eps_end = st.slider("ε end", 0.0, 0.5, 0.05, 0.01, disabled=training)
+        eps_decay_fraction = st.slider("ε decay fraction", 0.1, 1.0, 0.8, 0.05, disabled=training,
+                                       help="Fraction of episodes over which ε linearly decays to ε end.")
+    else:
+        eps_start = eps_end = st.slider("ε", 0.0, 1.0, 0.1, 0.01, disabled=training,
+                                        help="Fixed exploration rate for the whole run.")
+        eps_decay_fraction = 1.0
 
-start, stop, reset = train_stop_reset(training)
+start, stop = train_stop(training)
 
 st.divider()
-
-if reset and not training:
-    for key, value in defaults.items():
-        st.session_state[f"{ROOM_ID}_{key}"] = value
-    st.rerun()
 
 if start and not training:
     for key in ("history", "checkpoints", "policy", "values", "v_start",
@@ -117,15 +121,17 @@ if start and not training:
         st.session_state[f"{ROOM_ID}_{key}"] = defaults[key]
     st.session_state[f"{ROOM_ID}_training"] = True
     st.session_state[f"{ROOM_ID}_gamma"] = gamma
-    st.session_state[f"{ROOM_ID}_env"] = {"slip_prob": slip_prob, "trap_reward": trap_reward}
+    st.session_state[f"{ROOM_ID}_env"] = {
+        "slip_prob": slip_prob, "trap_reward": trap_reward, "deadly_traps": deadly_traps,
+    }
     cfg = {
         "slip_prob": slip_prob,
         "trap_reward": trap_reward,
+        "deadly_traps": deadly_traps,
         "sarsa": {
             "episodes": episodes, "gamma": gamma, "alpha": alpha, "decay_alpha": decay_alpha,
             "epsilon_start": eps_start, "epsilon_end": eps_end,
             "epsilon_decay_fraction": eps_decay_fraction, "max_steps": max_steps,
-            "snapshot_interval": snapshot_interval,
         },
     }
     runner.start(_train_fn, cfg)
@@ -152,6 +158,7 @@ for msg_type, payload in runner.drain():
             "episodes": payload["episodes_run"],
             "slip_prob": env["slip_prob"],
             "trap_reward": env["trap_reward"],
+            "deadly_traps": env["deadly_traps"],
         })
     if msg_type == "done":
         st.session_state[f"{ROOM_ID}_training"] = False
@@ -159,8 +166,11 @@ for msg_type, payload in runner.drain():
 tab_info, tab_train, tab_board = st.tabs(["ℹ️ Info", "📈 Train Result", "🏁 Run episode"])
 
 with tab_info:
-    preview_grid = make_room3_grid(slip_prob=slip_prob, trap_reward=trap_reward)
+    preview_grid = make_room3_grid(slip_prob=slip_prob, trap_reward=trap_reward,
+                                   deadly_traps=deadly_traps)
     st.plotly_chart(render_grid(preview_grid, title="Room 3 layout"), use_container_width=True)
+    if deadly_traps:
+        st.caption("☠️ Deadly traps are on — the red trap tiles now end the episode in failure.")
     st.markdown(Path("docs/room3.md").read_text(encoding="utf-8"))
 
 with tab_train:
@@ -182,6 +192,16 @@ with tab_train:
         v_start = st.session_state[f"{ROOM_ID}_v_start"]
         c3.metric("V(start)", "—" if v_start is None else f"{v_start:.2f}",
                   help="max_a Q(start, a) from the learned Q-table — the score of the training.")
+
+        outcomes = history.get("outcome") or []
+        if len(outcomes) == len(rewards) and outcomes:
+            escaped = outcomes.count("goal")
+            failed = len(outcomes) - escaped
+            s1, s2 = st.columns(2)
+            s1.metric("✅ Succeeded (escaped)", f"{escaped:,}",
+                      help=f"{100 * escaped / len(outcomes):.1f}% of episodes reached the goal.")
+            s2.metric("❌ Failed", f"{failed:,}",
+                      help="Episodes that hit a deadly trap or timed out without escaping.")
 
         st.plotly_chart(line_chart({"reward": rewards, "smoothed": _moving_avg(rewards)},
                                    title="Reward per episode"), use_container_width=True)
@@ -210,7 +230,8 @@ with tab_board:
     if not checkpoints or env is None:
         st.info("Train the room first to inspect and replay the learned policy.")
     else:
-        grid = make_room3_grid(env["slip_prob"], env["trap_reward"])
+        grid = make_room3_grid(env["slip_prob"], env["trap_reward"],
+                               env.get("deadly_traps", False))
 
         mode = st.radio("View", ["📊 Checkpoint snapshot", "🏁 Escape attempt"], horizontal=True)
 
@@ -225,7 +246,7 @@ with tab_board:
         else:
             policy = st.session_state[f"{ROOM_ID}_policy"] or checkpoints[-1]["policy"]
             if st.button("🏁 Run escape attempt"):
-                path, rewards, steps, success = run_episode(grid, policy, max_attempt_steps)
+                path, rewards, steps, success = run_episode(grid, policy)
                 solved_gamma = st.session_state[f"{ROOM_ID}_gamma"] or gamma
                 st.session_state[f"{ROOM_ID}_attempt_path"] = path
                 st.session_state[f"{ROOM_ID}_attempt_steps"] = steps

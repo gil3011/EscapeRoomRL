@@ -41,6 +41,18 @@ def test_trap_gives_negative_reward_but_does_not_terminate():
     assert state == (1, 1)
 
 
+def test_deadly_trap_terminates_the_episode_as_a_failure():
+    g = GridWorld(size=2, start=(0, 0), goal=(1, 1), traps=frozenset({(0, 1)}),
+                  trap_reward=-1.0, deadly_traps=True)
+    g.reset()
+    state, reward, done, _ = g.step(RIGHT)
+    assert state == (0, 1)
+    assert reward == -1.0
+    assert done is True            # deadly: the episode ends here
+    assert g.is_terminal(state)    # ...and the trap cell is terminal
+    assert g.is_goal(state) is False  # ...but it is a failure, not a win
+
+
 def test_slip_probability_one_never_takes_intended_action():
     g = GridWorld(size=5, start=(2, 2), goal=(4, 4), slippery=frozenset({(2, 2)}),
                   slip_prob=1.0, seed=0)

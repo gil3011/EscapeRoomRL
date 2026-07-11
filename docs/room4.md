@@ -1,9 +1,10 @@
 ## The Off-Policy Cellar — Q-Learning
 
-The hardest grid room, and the twin of Room 3. Same model-free setup — the agent only
-calls `step()` and learns `Q(s, a)` from experience — but two things are new: the
-**algorithm** (off-policy Q-learning instead of on-policy SARSA) and the **board** (a
-moving patrol enemy and a trap door).
+The hardest grid room, and the twin of Room 3 — *same board*, so the comparison is clean.
+Same model-free setup too — the agent only calls `step()` and learns `Q(s, a)` from
+experience — but two things differ from Room 3: the **algorithm** (off-policy Q-learning
+instead of on-policy SARSA) and one **mechanic** (a moving patrol enemy in place of Room
+3's helpful shortcut).
 
 ### SARSA vs. Q-learning — one line of difference
 
@@ -30,8 +31,8 @@ exactly what this room's board provides.
 ### The moving patrol enemy 👾 — and why the state has to grow
 
 A 👾 patrols up and down the gap in the wall barrier (column 5), moving one cell every
-step. **Touching it ends the episode** with the `enemy_reward` penalty — the first room
-you can actually *lose*, not just time out.
+step along a fixed five-cell beat (rows 2-6). **Touching it ends the episode** with the
+`enemy_reward` penalty — the first room you can actually *lose*, not just time out.
 
 A moving hazard breaks something subtle: if the agent only knew its own cell, the same
 cell would be safe on one visit and lethal on another, depending on where the patrol
@@ -47,22 +48,17 @@ for a moment the 👾 is elsewhere. Q-learning learns to thread it tightly; a SA
 agent would leave a bigger safety margin, because its ε-greedy exploration near the patrol
 occasionally walks straight in.
 
-### The trap door 🕳️ — a bad teleport
-
-There's a tempting-looking cell just past the chokepoint that is actually a **trap door**:
-step on it (on purpose or via a slip) and you're flung backward toward the start (↩). It
-looks like it's on a fast route; the agent has to learn it's a mistake — the mirror image
-of Room 3's *helpful* shortcut.
-
 ### Board features
 
-- **Walls** (dark): the column-5 barrier leaves a 4-cell gap (rows 3-6) — the only crossing.
+- **Walls** (dark): the column-5 barrier leaves a 5-cell gap (rows 2-6) — the only crossing.
 - **Slippery cells** (blue): random legal move with probability `slip_prob` (kept away from
   the gap, so the crossing risk is about *timing*, not luck).
 - **Traps** (red): a non-terminal cost, as before.
-- **Trap door** (🕳️ → ↩, red): teleports the agent backward.
-- **Patrol enemy** (👾, red trail): moving, terminal-on-contact.
+- **Patrol enemy** (👾, red trail): ping-pongs deterministically up/down the gap, terminal-on-contact.
 - **Goal** (green 🚪): the only success-terminal cell.
+
+The board is the same terrain as Room 3 — the difference is the moving patrol (and that
+Room 3 has a helpful shortcut where Room 4 has none).
 
 Reward model matches Rooms 1/3 — no step cost, fixed high goal reward, discounting shapes
 V — plus the terminal `enemy_reward` on collision.
